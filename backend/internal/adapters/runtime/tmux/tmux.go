@@ -51,7 +51,6 @@ var _ ports.Runtime = (*Runtime)(nil)
 
 type runner interface {
 	Run(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
-	Start(env []string, name string, args ...string) error
 }
 
 type execRunner struct{}
@@ -60,12 +59,6 @@ func (execRunner) Run(ctx context.Context, env []string, name string, args ...st
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(append([]string(nil), os.Environ()...), env...)
 	return cmd.CombinedOutput()
-}
-
-func (execRunner) Start(env []string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Env = append(append([]string(nil), os.Environ()...), env...)
-	return cmd.Start()
 }
 
 // New builds a tmux Runtime, filling unset Options with defaults: binary "tmux"

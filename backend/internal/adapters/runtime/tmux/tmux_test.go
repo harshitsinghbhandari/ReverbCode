@@ -40,13 +40,6 @@ func (f *fakeRunner) Run(_ context.Context, env []string, name string, args ...s
 	return out, nil
 }
 
-func (f *fakeRunner) Start(env []string, name string, args ...string) error {
-	f.calls = append(f.calls, runnerCall{env: append([]string(nil), env...), name: name, args: append([]string(nil), args...)})
-	if len(f.outputs) > 0 {
-		f.outputs = f.outputs[1:]
-	}
-	return f.err
-}
 
 // -- helpers --
 
@@ -320,13 +313,6 @@ func (f *fakeRunnerSelectiveErr) Run(_ context.Context, env []string, name strin
 	return out, nil
 }
 
-func (f *fakeRunnerSelectiveErr) Start(env []string, name string, args ...string) error {
-	f.calls = append(f.calls, runnerCall{env: append([]string(nil), env...), name: name, args: append([]string(nil), args...)})
-	if len(f.outputs) > 0 {
-		f.outputs = f.outputs[1:]
-	}
-	return nil
-}
 
 // -- Destroy tests --
 
