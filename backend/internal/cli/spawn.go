@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"runtime"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"
 )
 
@@ -97,14 +99,17 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if _, err := fmt.Fprintf(out, "spawned session %s (%s)%s\n", res.Session.ID, res.Session.Status, claimLabel); err != nil {
 				return err
 			}
-			// The daemon runs zellij under a short, non-default socket dir (see
-			// zellij.DefaultSocketDir), so a plain `zellij attach` wouldn't find
-			// the session — prefix the env so the hint is copy-pasteable. Use the
-			// sanitised name zellij actually registers (zellij.SessionName): a long
-			// session id maps to a different name than the raw id.
-			attach := fmt.Sprintf("zellij attach %s", zellij.SessionName(res.Session.ID))
-			if dir := zellij.DefaultSocketDir(); dir != "" {
-				attach = fmt.Sprintf("ZELLIJ_SOCKET_DIR=%s %s", dir, attach)
+			// Print a copy-pasteable attach hint for the selected runtime.
+			// On Darwin/Linux: tmux attach-session using the sanitised session name.
+			// On Windows: zellij attach with the short socket dir prefix.
+			var attach string
+			if runtime.GOOS != "windows" {
+				attach = fmt.Sprintf("tmux attach -t %s", tmux.SessionName(res.Session.ID))
+			} else {
+				attach = fmt.Sprintf("zellij attach %s", zellij.SessionName(res.Session.ID))
+				if dir := zellij.DefaultSocketDir(); dir != "" {
+					attach = fmt.Sprintf("ZELLIJ_SOCKET_DIR=%s %s", dir, attach)
+				}
 			}
 			_, err := fmt.Fprintf(out, "attach with: %s\n", attach)
 			return err

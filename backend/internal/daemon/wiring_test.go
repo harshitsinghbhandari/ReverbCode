@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"
 	telemetryadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
@@ -149,9 +150,9 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	lcm := lifecycle.New(store, nil)
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	runtime := zellij.New(zellij.Options{})
-	messenger := newSessionMessenger(store, runtime, log)
-	svc, reviewSvc, err := startSession(cfg, runtime, store, lcm, messenger, telemetryadapter.NoopSink{}, log)
+	rt := runtimeselect.New(nil)
+	messenger := newSessionMessenger(store, rt, log)
+	svc, reviewSvc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}

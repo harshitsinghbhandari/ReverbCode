@@ -17,6 +17,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"runtime"
+
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/codex"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -168,7 +170,7 @@ func (c *commandContext) runDoctor(ctx context.Context) []doctorCheck {
 
 	checks = append(checks,
 		c.checkGit(ctx),
-		c.checkZellij(ctx),
+		c.checkTerminalRuntime(ctx),
 		c.checkAOBinary(),
 	)
 	for _, harness := range doctorHarnesses {
@@ -288,6 +290,33 @@ func (c *commandContext) checkGit(ctx context.Context) doctorCheck {
 		return doctorCheck{Level: doctorWarn, Section: doctorSectionTools, Name: "git", Message: fmt.Sprintf("%s (version %s; AO expects >= %s for worktrees)", path, version, minGitVersion)}
 	}
 	return doctorCheck{Level: doctorPass, Section: doctorSectionTools, Name: "git", Message: fmt.Sprintf("%s (version %s; supports worktrees)", path, version)}
+}
+
+// checkTerminalRuntime checks for the runtime multiplexer used on this platform:
+// tmux on Darwin/Linux, zellij on Windows.
+func (c *commandContext) checkTerminalRuntime(ctx context.Context) doctorCheck {
+	if runtime.GOOS == "windows" {
+		return c.checkZellij(ctx)
+	}
+	return c.checkTmux(ctx)
+}
+
+func (c *commandContext) checkTmux(ctx context.Context) doctorCheck {
+	path, err := c.deps.LookPath("tmux")
+	if err != nil || path == "" {
+		return doctorCheck{Level: doctorWarn, Section: doctorSectionTools, Name: "tmux", Message: "not found in PATH"}
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	out, err := c.deps.CommandOutput(reqCtx, path, "-V")
+	if err != nil {
+		return doctorCheck{Level: doctorFail, Section: doctorSectionTools, Name: "tmux", Message: fmt.Sprintf("%s: %v", path, err)}
+	}
+	version := firstOutputLine(out)
+	if version == "" {
+		version = "version unknown"
+	}
+	return doctorCheck{Level: doctorPass, Section: doctorSectionTools, Name: "tmux", Message: fmt.Sprintf("%s (%s)", path, version)}
 }
 
 func (c *commandContext) checkZellij(ctx context.Context) doctorCheck {
