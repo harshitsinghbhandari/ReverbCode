@@ -2,6 +2,7 @@ package conpty
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -122,4 +123,39 @@ func TestRingSnapshotExcludesPartial(t *testing.T) {
 	if !strings.Contains(snap, "complete\n") {
 		t.Errorf("Snapshot missing complete line: %q", snap)
 	}
+}
+
+// TestRingConcurrent validates the advertised goroutine-safety of Ring under the
+// race detector. It spawns 10 writer goroutines (Append) and 10 reader goroutines
+// (Snapshot + Tail) that all run concurrently; any data race will be caught by
+// "go test -race". The test itself only asserts no panic and no race.
+func TestRingConcurrent(t *testing.T) {
+	const goroutines = 10
+	const iters = 100
+
+	r := NewRing()
+	var wg sync.WaitGroup
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				r.Append([]byte("line\n"))
+			}
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				_ = r.Snapshot()
+				_ = r.Tail(10)
+			}
+		}()
+	}
+
+	wg.Wait()
 }

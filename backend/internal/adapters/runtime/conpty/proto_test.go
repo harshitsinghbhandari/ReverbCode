@@ -140,26 +140,35 @@ func TestParserInterleavedTypes(t *testing.T) {
 	}
 }
 
-// TestParserPayloadIsCopy verifies that mutating the fed slice after Feed does
-// NOT corrupt the payload delivered to onMessage.
+// TestParserPayloadIsCopy verifies that the payload delivered to onMessage is a
+// true copy, not a subslice of the parser's internal buffer. It exercises the
+// aliasing path that matters in practice: feed frame1, capture its payload, then
+// feed frame2 of the SAME length so the parser reuses the same buffer region;
+// frame1's captured bytes must be unchanged. This catches a regression where
+// payload was a raw subslice of p.buf instead of a make+copy.
 func TestParserPayloadIsCopy(t *testing.T) {
 	var got []collected
 	p := NewMessageParser(collect(&got))
 
-	src := []byte("original")
-	frame := EncodeMessage(MsgTerminalData, src)
-	p.Feed(frame)
-
-	// Mutate the frame bytes that were fed.
-	for i := range frame {
-		frame[i] = 0xFF
-	}
-
+	// Feed frame1 and capture the delivered payload pointer.
+	frame1 := EncodeMessage(MsgTerminalData, []byte("original"))
+	p.Feed(frame1)
 	if len(got) != 1 {
-		t.Fatalf("got %d messages, want 1", len(got))
+		t.Fatalf("after frame1: got %d messages, want 1", len(got))
 	}
-	if !bytes.Equal(got[0].payload, []byte("original")) {
-		t.Errorf("payload corrupted after mutating fed slice: got %q", got[0].payload)
+	captured := got[0].payload
+
+	// Feed frame2 with the same payload length so the parser's internal buffer
+	// overwrites the exact byte range that frame1 occupied.
+	frame2 := EncodeMessage(MsgTerminalInput, []byte("XXXXXXXX")) // same len as "original"
+	p.Feed(frame2)
+	if len(got) != 2 {
+		t.Fatalf("after frame2: got %d messages, want 2", len(got))
+	}
+
+	// frame1's captured payload must be unaffected by the subsequent Feed.
+	if !bytes.Equal(captured, []byte("original")) {
+		t.Errorf("frame1 payload aliased internal buffer: got %q after frame2", captured)
 	}
 }
 
