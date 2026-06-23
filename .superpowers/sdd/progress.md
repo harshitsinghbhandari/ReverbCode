@@ -30,7 +30,7 @@ Tasks:
 - B3: pty-host serve engine (loopback TCP, NOT named pipe; ConPTY behind interface seam) — COMPLETE (41ce417..6cd6e2a, 35 tests -race clean incl. ordering regression test, review APPROVED; loopback decision documented; Windows go-pty file compile-checked only)
 - B4: conpty runtime adapter — COMPLETE (be06609..0bc26e5, 49 tests -race, IsAlive dead-vs-transient fixed, registry-recovery path; Windows spawn file compile-checked only)
 - B5: terminal Attach/Stream interface change + tmux/zellij/conpty Attach — COMPLETE (8d757ed..HEAD, 1638 tests -race across 78 pkgs, all 3 GOOS, real tmux+zellij attach integration pass, review APPROVED; conpty loopbackStream stress-tested clean)
-- B6: select conpty on Windows + delete zellij + doctor/spawn + register pty-host subcommand — NOT STARTED
+- B6: select conpty on Windows + delete zellij + pty-host subcommand + doctor/spawn — COMPLETE (b9ef1f5..HEAD, 1607 tests -race across 77 pkgs, all 3 GOOS, zellij GONE, arg-contract verified, review APPROVED)
 
 Faithful-port references (agent-orchestrator):
 - packages/plugins/runtime-process/src/pty-host.ts (protocol, ring, fan-out, shutdown)
