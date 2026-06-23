@@ -91,7 +91,7 @@ func Run() error {
 	defer termMgr.Close()
 
 	// The agent messenger sends validated user input to the session's live
-	// zellij pane. Keep this path small until durable inbox semantics are needed.
+	// runtime pane. Keep this path small until durable inbox semantics are needed.
 	// Built before the Lifecycle Manager so the LCM can use it for SCM-driven
 	// agent nudges (CI failure, review feedback, merge conflict).
 	messenger := newSessionMessenger(store, runtimeAdapter, log)
@@ -106,7 +106,7 @@ func Run() error {
 	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
 
 	// Wire the controller-facing session service over the same store + LCM, the
-	// zellij runtime, a gitworktree workspace, the per-session agent resolver
+	// selected runtime, a gitworktree workspace, the per-session agent resolver
 	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
 	// on the API.
 	sessionSvc, reviewSvc, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, log)

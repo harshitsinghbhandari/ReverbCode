@@ -11,13 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-
-	"runtime"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/codex"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"

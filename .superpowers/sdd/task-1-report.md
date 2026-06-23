@@ -63,3 +63,67 @@ $ go vet ./internal/adapters/runtime/tmux/...
 
 None. The build is green, all 34 tests pass (including the integration tests on
 the installed tmux 3.6b), and no files outside the new package were modified.
+
+---
+
+# Code-Review Fix Report (commit 44c3e61)
+
+## What was fixed
+
+Four findings from code review, all scoped to `backend/internal/adapters/runtime/tmux/`.
+
+### Finding 1: Em dash removed (hard project rule)
+
+File: `tmux_test.go:462`
+
+Replaced the em dash character in the fatal message with a semicolon:
+- Before: `"IsAlive: got nil, want probe error -- failed probe must not read as dead"` (with actual em-dash Unicode)
+- After: `"IsAlive: got nil, want probe error; failed probe must not read as dead"`
+
+A full package grep confirmed zero remaining em dashes.
+
+### Finding 2: Integration test session IDs derived from t.Name()
+
+File: `tmux_integration_test.go`
+
+Both integration tests previously used hardcoded session IDs that would collide under `-count=2` or parallel runs:
+- `TestRuntimeIntegration`: was `"ao_itest_tmux"`, now `strings.ReplaceAll(t.Name(), "/", "_")`
+- `TestRuntimeIntegrationExactSessionParsing`: was `"ao_tmux_exact_long"` / `"ao_tmux_exact"`, now `base + "_long"` / `base` where `base = strings.ReplaceAll(t.Name(), "/", "_")`
+
+Added `domain` import to support the `domain.SessionID(id)` conversion in `RuntimeConfig.SessionID`.
+
+Existing `t.Cleanup`/Destroy guards retained as-is.
+
+### Finding 3: Dead scaffolding removed
+
+File: `tmux_test.go`, `TestCreateDestroysAndReturnsErrorWhenNotAlive`
+
+Removed 14 lines of dead scaffolding: unused `r, fr` and `r2, fr2` variables, their dead output assignments, and the stale comments explaining why they were bypassed. Only the live `r2 + fr3` path remains. Test assertions are unchanged.
+
+### Finding 4: Quoted `${SHELL:-/bin/sh}` in tmux.go
+
+File: `tmux.go` (line 464), `tmux_test.go` (2 assertion sites)
+
+Changed the keep-alive snippet from `exec ${SHELL:-/bin/sh} -i` to `exec "${SHELL:-/bin/sh}" -i` (double-quoted) to handle a `$SHELL` value with spaces in the path.
+
+Updated two unit test assertion strings to match:
+- `TestCommandBuilders`: both the input and want literals updated to the quoted form
+- `TestCreateLaunchCommandContainsKeepAliveShell`: `strings.Contains` check updated to the quoted form
+
+## Verification command outputs
+
+```
+$ cd backend && go build ./...
+# success
+
+$ go test ./internal/adapters/runtime/tmux/...
+# 34 passed in 1 packages
+
+$ go vet ./internal/adapters/runtime/tmux/...
+# no issues
+
+$ grep -rn "—" internal/adapters/runtime/tmux/ || echo "NO EM DASHES"
+NO EM DASHES
+```
+
+Commit: `44c3e61` on branch `migrate-zellij-to-tmux-conpty`.
