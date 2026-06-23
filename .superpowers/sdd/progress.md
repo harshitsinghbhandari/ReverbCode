@@ -43,3 +43,10 @@ Faithful-port references (agent-orchestrator):
 
 ## Ledger
 (append "Task N: complete (commits <base7>..<head7>, review clean)" as tasks finish)
+
+## FINAL: Phase B SHIP (whole-branch review)
+All 6 Phase B tasks complete + reviewed. End state: tmux (Darwin/Linux), conpty (Windows), zellij deleted.
+darwin/linux/windows build; 1607 tests -race across 77 pkgs; vet clean.
+VERIFIED on Darwin: full tmux path + all cross-platform conpty internals (protocol, ring, host serve engine over real loopback w/ fake ptyConn, client/attach, registry, dead-vs-transient IsAlive, injectable-spawn Create/Destroy).
+UNVERIFIED (needs Windows hardware): real go-pty ConPTY child spawn, detached-spawn survival, OpenProcess pidAlive, 0x800700e8 cleanup ordering.
+HEAD = 284e840
