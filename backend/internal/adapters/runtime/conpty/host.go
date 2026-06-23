@@ -168,17 +168,25 @@ func (h *host) sendTo(conn net.Conn, msg []byte) {
 
 // handleConn manages the lifecycle of a single client connection.
 func (h *host) handleConn(conn net.Conn) {
-	// Scrollback replay: send current ring snapshot as a single TerminalData
-	// frame before registering the client in the broadcast set.
+	// Scrollback replay: take the ring snapshot, write it to the conn, and add
+	// the conn to the broadcast set all under a SINGLE h.mu hold. broadcast()
+	// also takes h.mu, so it cannot interleave: any PTY chunk that arrives is
+	// either already in this snapshot, or is broadcast strictly after the conn
+	// joins the set. Doing this in two separate locks would let a chunk slip
+	// into the gap (in neither the snapshot nor this client's broadcast) and be
+	// silently dropped.
+	// ponytail: the snapshot write happens while holding h.mu. It is bounded by
+	// MaxOutputLines (the ring cap), so the lock hold is bounded; upgrade path
+	// is a per-client send queue if a slow client ever stalls broadcast.
+	h.mu.Lock()
 	snap := h.cfg.Ring.Snapshot()
 	if len(snap) > 0 {
 		if _, err := conn.Write(EncodeMessage(MsgTerminalData, snap)); err != nil {
+			h.mu.Unlock()
 			_ = conn.Close()
 			return
 		}
 	}
-
-	h.mu.Lock()
 	h.clients[conn] = struct{}{}
 	h.mu.Unlock()
 

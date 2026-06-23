@@ -4,7 +4,7 @@ package conpty
 
 import (
 	"fmt"
-	"os/exec"
+	"os"
 	"sync"
 
 	gopty "github.com/aymanbagabas/go-pty"
@@ -46,7 +46,7 @@ func newConPTY(cwd, shellCmd string, shellArgs []string) (ptyConn, error) {
 	cmd := cp.Command(shellCmd, shellArgs...)
 	cmd.Dir = cwd
 	// Inherit parent env so PATH, HOME, etc. are available.
-	cmd.Env = exec.Command(shellCmd).Environ()
+	cmd.Env = os.Environ()
 
 	if err := cmd.Start(); err != nil {
 		_ = cp.Close()
@@ -78,7 +78,15 @@ func (c *conptyConn) wait() {
 
 func (c *conptyConn) Read(b []byte) (int, error)  { return c.pty.Read(b) }
 func (c *conptyConn) Write(b []byte) (int, error) { return c.pty.Write(b) }
-func (c *conptyConn) Close() error                 { return c.pty.Close() }
+func (c *conptyConn) Close() error {
+	err := c.pty.Close()
+	// Best-effort kill: a child that ignores ConPTY EOF still gets terminated
+	// so Done() fires. Mirrors pty.kill() in pty-host.ts.
+	if c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
+	}
+	return err
+}
 func (c *conptyConn) Resize(cols, rows int) error  { return c.pty.Resize(cols, rows) }
 func (c *conptyConn) Done() <-chan struct{}         { return c.doneC }
 func (c *conptyConn) PID() int {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,6 +242,117 @@ func TestScrollbackReplay(t *testing.T) {
 	}
 	if string(payload) != string(snap) {
 		t.Fatalf("scrollback payload = %q, want %q", payload, snap)
+	}
+}
+
+// TestScrollbackLiveOrdering_NoDrop is a regression test for the bug where the
+// new-client handler took the ring Snapshot and registered the client in two
+// separate h.mu acquisitions. A PTY chunk arriving in that gap landed in
+// neither the snapshot nor that client's broadcast and was silently dropped,
+// producing a hole in the middle of the client's stream.
+//
+// The PTY emits a long stream of numbered chunks continuously while a client
+// connects. The fakePTY's WriteOutput blocks until pumpPTY consumes each chunk,
+// so output is interleaved with the connect, exercising the race window. The
+// guaranteed invariant is: the client's received byte stream must be a
+// CONTIGUOUS suffix of the full PTY sequence, i.e. it may legitimately start
+// late (the snapshot only captures whatever was written before the connect),
+// but once it starts there must be NO internal gap. The old two-step code
+// dropped a chunk between snapshot and registration, leaving an internal hole;
+// this test detects that hole. Reliable under -race -count=20: the
+// continuous-emit setup reliably lands a chunk in the race window, and it
+// reliably fails against the old code.
+func TestScrollbackLiveOrdering_NoDrop(t *testing.T) {
+	f := startServe(t, 200)
+	defer f.cancel()
+
+	// Build the full byte sequence the PTY will ever have produced. Each chunk
+	// is a complete line ("[NNNN]\n") so it lands in the ring's snapshot (the
+	// ring only stores completed lines), exercising the snapshot-write path as
+	// well as the live-broadcast boundary where the drop bug lived.
+	const nChunks = 300
+	chunk := func(i int) []byte { return []byte(fmt.Sprintf("[%04d]\n", i)) }
+	var full []byte
+	for i := 0; i < nChunks; i++ {
+		full = append(full, chunk(i)...)
+	}
+
+	// Emit continuously; each WriteOutput blocks until pumpPTY reads it.
+	emitDone := make(chan struct{})
+	go func() {
+		defer close(emitDone)
+		for i := 0; i < nChunks; i++ {
+			if _, err := f.pty.WriteOutput(chunk(i)); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Connect mid-stream so the snapshot is taken while chunks are in flight.
+	c := newTestClient(t, f.addr)
+	defer c.close()
+
+	// Collect frames until the client's stream contains the final chunk (the
+	// last line the PTY emits), or until the overall deadline. The sentinel is
+	// the last line's bytes; once we have seen it, the whole tail has arrived.
+	sentinel := string(chunk(nChunks - 1))
+	var got []byte
+	deadline := time.After(5 * time.Second)
+collect:
+	for !strings.Contains(string(got), sentinel) {
+		select {
+		case fr, ok := <-c.frameC:
+			if !ok {
+				break collect
+			}
+			if fr.typ != MsgTerminalData {
+				t.Fatalf("unexpected frame type 0x%02x", fr.typ)
+			}
+			got = append(got, fr.payload...)
+		case <-deadline:
+			break collect
+		}
+	}
+	// Emitter must have finished (it produces the sentinel last).
+	select {
+	case <-emitDone:
+	case <-time.After(time.Second):
+		t.Fatal("emitter did not finish")
+	}
+	if !strings.Contains(string(got), sentinel) {
+		t.Fatalf("client never received the final chunk %q; got %d bytes", sentinel, len(got))
+	}
+
+	// Parse the received bytes back into the ordered list of line indices.
+	// Each line is "[NNNN]\n". The client may legitimately start late (the
+	// snapshot only captures lines written before the connect), and a line may
+	// appear twice at the snapshot/live seam (a chunk landing in the ring just
+	// before this client registers can be both snapshotted and broadcast). The
+	// DROP bug instead produced a MISSING index in the middle. So the invariant
+	// is: the indices, in order, are non-decreasing, advance by 0 or 1 each
+	// step (no jump that skips an index), and reach the final index nChunks-1.
+	lines := strings.Split(string(got), "\n")
+	// Trailing "" after the final \n.
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	var prev int = -1
+	for li, line := range lines {
+		var idx int
+		if _, err := fmt.Sscanf(line, "[%04d]", &idx); err != nil {
+			t.Fatalf("unparseable line %d %q in client stream: %v", li, line, err)
+		}
+		if li == 0 {
+			prev = idx
+			continue
+		}
+		if idx != prev && idx != prev+1 {
+			t.Fatalf("non-contiguous line indices (dropped chunk): %d followed by %d", prev, idx)
+		}
+		prev = idx
+	}
+	if prev != nChunks-1 {
+		t.Fatalf("client stream did not reach the final chunk: last index %d, want %d", prev, nChunks-1)
 	}
 }
 
