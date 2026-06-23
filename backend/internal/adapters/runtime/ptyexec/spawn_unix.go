@@ -22,7 +22,7 @@ import (
 // Spawn starts argv on a real PTY via creack/pty, sized rows×cols from birth
 // when a size is known: an attach client reads the tty size once at startup, and
 // a post-spawn TIOCSWINSZ depends on SIGWINCH delivery that can race the client
-// installing its handler — StartWithSize makes the first read correct by
+// installing its handler; StartWithSize makes the first read correct by
 // construction. env, when non-nil, replaces the inherited environment (mirrors
 // exec.Cmd.Env semantics). ctx cancellation closes the PTY through the same
 // graceful detach path as an explicit client close. Windows uses a ConPTY path
@@ -70,7 +70,7 @@ func (p *creackPTY) Resize(rows, cols uint16) error {
 	err := pty.Setsize(p.f, &pty.Winsize{Rows: rows, Cols: cols})
 	// Always follow with an explicit SIGWINCH: the kernel only raises one when
 	// the size actually changed, so a re-asserted (identical) grid would never
-	// reach an attach client that missed or lost the original signal — the
+	// reach an attach client that missed or lost the original signal; the
 	// session would stay laid out for a stale size, with no repaint until the
 	// next real change (the frontend re-sends its grid after each resize burst
 	// for exactly this self-heal; see useTerminalSession). The client re-reads
@@ -92,7 +92,7 @@ const detachGrace = 250 * time.Millisecond
 // itself from its mux server before exiting, while a SIGKILL'd one leaves
 // deregistration to the server noticing the dead socket. A dead-but-registered
 // client pins the session's size (a mux sizes a session to its smallest
-// client), so the next attach renders for the ghost's grid — the "terminal
+// client), so the next attach renders for the ghost's grid; the "terminal
 // doesn't repaint to the new size" desync. The master stays open through the
 // grace so the run loop's copyOut keeps draining the client's shutdown output
 // (a blocked tty write would stall the graceful exit past the grace).

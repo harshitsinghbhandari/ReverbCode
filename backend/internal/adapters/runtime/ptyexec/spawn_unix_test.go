@@ -37,7 +37,7 @@ func TestCreackPTYCloseIsIdempotent(t *testing.T) {
 // kernel only raises SIGWINCH when TIOCSWINSZ actually changes the size, so a
 // re-asserted (identical) grid relies on Resize's explicit signal. An attach
 // client that lost the original update would otherwise keep its server laid
-// out for a stale size forever — the "terminal doesn't repaint after resizing
+// out for a stale size forever; the "terminal doesn't repaint after resizing
 // the pane" desync.
 func TestCreackPTYResizeSignalsOnIdenticalSize(t *testing.T) {
 	p, err := Spawn(context.Background(),
@@ -49,7 +49,7 @@ func TestCreackPTYResizeSignalsOnIdenticalSize(t *testing.T) {
 
 	// Give the shell a beat to install the trap, then resize twice to the SAME
 	// size. The first call changes the size (fresh PTYs start at 0x0) and the
-	// second is identical — only the explicit signal can deliver it.
+	// second is identical; only the explicit signal can deliver it.
 	time.Sleep(200 * time.Millisecond)
 	if err := p.Resize(24, 80); err != nil {
 		t.Fatalf("resize 1: %v", err)
@@ -78,7 +78,7 @@ func TestCreackPTYResizeSignalsOnIdenticalSize(t *testing.T) {
 }
 
 // TestCreackPTYSpawnsAtRequestedSize: the child must see the requested grid on
-// its very first TIOCGWINSZ, with no SIGWINCH involved — sizing after exec
+// its very first TIOCGWINSZ, with no SIGWINCH involved; sizing after exec
 // races the client installing its WINCH handler (a missed signal strands the
 // session at the previous client's size).
 func TestCreackPTYSpawnsAtRequestedSize(t *testing.T) {
