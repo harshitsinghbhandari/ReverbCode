@@ -127,7 +127,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 }
 
 // runtimeMessageSender is the narrow part of the concrete runtime needed by
-// ao send. zellij.Runtime already implements this via SendMessage.
+// ao send. Both tmux.Runtime and conpty.Runtime implement this via SendMessage.
 type runtimeMessageSender interface {
 	SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error
 }

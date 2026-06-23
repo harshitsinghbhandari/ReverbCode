@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
-	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"
 )
 
 type spawnOptions struct {
@@ -101,15 +100,12 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			}
 			// Print a copy-pasteable attach hint for the selected runtime.
 			// On Darwin/Linux: tmux attach-session using the sanitised session name.
-			// On Windows: zellij attach with the short socket dir prefix.
+			// On Windows: ConPTY has no user-facing attach CLI; use the AO dashboard.
 			var attach string
 			if runtime.GOOS != "windows" {
 				attach = fmt.Sprintf("tmux attach -t %s", tmux.SessionName(res.Session.ID))
 			} else {
-				attach = fmt.Sprintf("zellij attach %s", zellij.SessionName(res.Session.ID))
-				if dir := zellij.DefaultSocketDir(); dir != "" {
-					attach = fmt.Sprintf("ZELLIJ_SOCKET_DIR=%s %s", dir, attach)
-				}
+				attach = "Attach from the AO dashboard (ConPTY sessions have no CLI attach command)"
 			}
 			_, err := fmt.Fprintf(out, "attach with: %s\n", attach)
 			return err

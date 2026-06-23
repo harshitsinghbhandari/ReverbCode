@@ -6,32 +6,26 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-// TestAttachmentStreamsRealZellijPane attaches a real PTY to a real Zellij
-// session and asserts output streams back, then that killing the pane stops the
-// attachment without a re-attach storm. Skipped when Zellij is unavailable.
-func TestAttachmentStreamsRealZellijPane(t *testing.T) {
-	zellijBin, err := exec.LookPath("zellij")
-	if err != nil {
-		t.Skip("zellij unavailable")
+// TestAttachmentStreamsRealTmuxPane attaches a real PTY to a real tmux session
+// and asserts output streams back, then that killing the session stops the
+// attachment without a re-attach storm. Skipped when tmux is unavailable.
+func TestAttachmentStreamsRealTmuxPane(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux unavailable")
 	}
 
 	name := "ao-term-it-" + strconv.Itoa(os.Getpid())
-	socketDir := filepath.Join("/tmp", name+"-socket")
-	if err := os.MkdirAll(socketDir, 0o755); err != nil {
-		t.Fatalf("mkdir socket dir: %v", err)
-	}
-	rt := zellij.New(zellij.Options{Binary: zellijBin, SocketDir: socketDir, ConfigDir: t.TempDir(), Timeout: 5 * time.Second})
+	rt := tmux.New(tmux.Options{Timeout: 10 * time.Second})
 	handle, err := rt.Create(context.Background(), ports.RuntimeConfig{
 		SessionID:     domain.SessionID(name),
 		WorkspacePath: t.TempDir(),
@@ -52,14 +46,6 @@ func TestAttachmentStreamsRealZellijPane(t *testing.T) {
 	eventually(t, 3*time.Second, func() bool { return a.write([]byte("echo AO_MARKER_42\n")) == nil })
 	eventually(t, 5*time.Second, func() bool { return strings.Contains(got.string(), "AO_MARKER_42") })
 
-	// A fresh attach must carry zellij's alt-screen init handshake. Mouse
-	// reporting is deliberately disabled for AO's embedded client, so this test
-	// should not require SGR mouse mode.
-	eventually(t, 5*time.Second, func() bool {
-		out := got.string()
-		return strings.Contains(out, "\x1b[?1049h")
-	})
-
 	// Kill the session: the attachment must observe it as gone and not re-attach.
 	if err := rt.Destroy(context.Background(), handle); err != nil {
 		t.Fatalf("Destroy: %v", err)
@@ -70,21 +56,14 @@ func TestAttachmentStreamsRealZellijPane(t *testing.T) {
 // TestAttachmentReattachAdoptsNewSize is the end-to-end regression for the
 // stale-size desync: client A holds the session at one grid, detaches, and
 // client B immediately attaches at a different grid (the frontend's
-// remount/reconnect flow). B's zellij client must adopt B's size — the inner
-// pane's tty must report it — not stay laid out for A's. This is where the
-// spawn-at-size + explicit-WINCH + SIGTERM-detach fixes meet a real zellij.
+// remount/reconnect flow). B's tmux client must adopt B's size, not A's.
 func TestAttachmentReattachAdoptsNewSize(t *testing.T) {
-	zellijBin, err := exec.LookPath("zellij")
-	if err != nil {
-		t.Skip("zellij unavailable")
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux unavailable")
 	}
 
 	name := "ao-term-size-it-" + strconv.Itoa(os.Getpid())
-	socketDir := filepath.Join("/tmp", name+"-socket")
-	if err := os.MkdirAll(socketDir, 0o755); err != nil {
-		t.Fatalf("mkdir socket dir: %v", err)
-	}
-	rt := zellij.New(zellij.Options{Binary: zellijBin, SocketDir: socketDir, ConfigDir: t.TempDir(), Timeout: 5 * time.Second})
+	rt := tmux.New(tmux.Options{Timeout: 10 * time.Second})
 	handle, err := rt.Create(context.Background(), ports.RuntimeConfig{
 		SessionID:     domain.SessionID(name),
 		WorkspacePath: t.TempDir(),
@@ -111,22 +90,20 @@ func TestAttachmentReattachAdoptsNewSize(t *testing.T) {
 	a, _, openedA, cancelA := attachAt(37, 115)
 	select {
 	case <-openedA:
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("client A did not attach")
 	}
 	a.close()
 	cancelA()
 
-	// Client B re-attaches immediately at 148x40 — no settle gap, same as the
-	// frontend reconnecting. The inner pane must see B's grid (zellij chrome
-	// shaves a couple rows/cols, so assert the reported cols land near 148 and
-	// far from 115).
+	// Client B re-attaches immediately at 148x40. The inner pane must see B's
+	// grid (tmux may shave a row/col; assert cols land near 148 and far from 115).
 	b, gotB, openedB, cancelB := attachAt(40, 148)
 	defer cancelB()
 	defer b.close()
 	select {
 	case <-openedB:
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("client B did not attach")
 	}
 
@@ -145,6 +122,6 @@ func TestAttachmentReattachAdoptsNewSize(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return cols > 130 // B's 148 minus zellij chrome; a stale A-layout reports ≤115
+		return cols > 130 // B's 148 minus any tmux chrome; a stale A-layout reports <=115
 	})
 }

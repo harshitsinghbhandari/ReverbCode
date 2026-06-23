@@ -11,7 +11,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
-	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/zellij"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
 	telemetryadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -321,7 +321,7 @@ func TestWiring_StartLifecycleThreadsMessengerIntoLCM(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	messenger := &captureMessenger{}
-	stack := startLifecycle(ctx, store, zellij.New(zellij.Options{}), messenger, nil, nil, log)
+	stack := startLifecycle(ctx, store, tmux.New(tmux.Options{}), messenger, nil, nil, log)
 	t.Cleanup(stack.Stop)
 	t.Cleanup(cancel)
 
@@ -378,22 +378,3 @@ func TestProjectRepoResolver_ResolvesRegisteredProject(t *testing.T) {
 	}
 }
 
-// TestDaemonZellijSocketDir_LeavesBudgetForSessionNames guards the fix for the
-// zellij "session name must be less than 0 characters" spawn failure: the
-// daemon's socket dir must be short enough that a max-length (48-char) session
-// name still fits the ~103-byte unix-domain-socket-path budget. zellij's long
-// $TMPDIR default (the bug) would fail this.
-func TestDaemonZellijSocketDir_LeavesBudgetForSessionNames(t *testing.T) {
-	dir := zellij.DefaultSocketDir()
-	if dir == "" {
-		t.Skip("zellij not used on this platform")
-	}
-	const (
-		unixSocketPathMax = 103 // sun_path budget zellij enforces on macOS
-		zellijOverhead    = 24  // zellij's version subdir + separators (generous)
-		maxSessionName    = 48  // zellijSessionName's cap
-	)
-	if budget := unixSocketPathMax - len(dir) - zellijOverhead; budget < maxSessionName {
-		t.Fatalf("zellij socket dir %q too long: %d bytes left for the session name, need >= %d", dir, budget, maxSessionName)
-	}
-}
