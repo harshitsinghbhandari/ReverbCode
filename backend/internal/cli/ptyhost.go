@@ -14,9 +14,9 @@ import (
 // consumed by cobra before being passed to RunHost.
 func newPtyHostCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "pty-host",
-		Short:             "Run a ConPTY pty-host process (internal)",
-		Hidden:            true,
+		Use:                "pty-host",
+		Short:              "Run a ConPTY pty-host process (internal)",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			code := conpty.RunHost(args, os.Stdout)

@@ -199,19 +199,20 @@ func (r *Runtime) resolve(id string) *hostSession {
 		return nil
 	}
 	for _, e := range entries {
-		if e.SessionID == id {
-			// Re-populate the map so subsequent calls skip the file scan.
-			recovered := &hostSession{addr: e.PipePath, pid: e.PtyHostPID}
-			r.mu.Lock()
-			// Only store if another goroutine hasn't beaten us.
-			if r.sessions[id] == nil {
-				r.sessions[id] = recovered
-			} else {
-				recovered = r.sessions[id]
-			}
-			r.mu.Unlock()
-			return recovered
+		if e.SessionID != id {
+			continue
 		}
+		// Re-populate the map so subsequent calls skip the file scan.
+		recovered := &hostSession{addr: e.PipePath, pid: e.PtyHostPID}
+		r.mu.Lock()
+		// Only store if another goroutine hasn't beaten us.
+		if r.sessions[id] == nil {
+			r.sessions[id] = recovered
+		} else {
+			recovered = r.sessions[id]
+		}
+		r.mu.Unlock()
+		return recovered
 	}
 	return nil
 }

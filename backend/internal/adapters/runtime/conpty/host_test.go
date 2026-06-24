@@ -111,9 +111,12 @@ func (f *fakePTY) signalExit(code int) {
 // ---------------------------------------------------------------------------
 
 type testClient struct {
-	conn    net.Conn
-	frameC  chan struct{ typ byte; payload []byte }
-	parser  *MessageParser
+	conn   net.Conn
+	frameC chan struct {
+		typ     byte
+		payload []byte
+	}
+	parser *MessageParser
 }
 
 func newTestClient(t *testing.T, addr string) *testClient {
@@ -123,11 +126,17 @@ func newTestClient(t *testing.T, addr string) *testClient {
 		t.Fatalf("dial %s: %v", addr, err)
 	}
 	tc := &testClient{
-		conn:   conn,
-		frameC: make(chan struct{ typ byte; payload []byte }, 64),
+		conn: conn,
+		frameC: make(chan struct {
+			typ     byte
+			payload []byte
+		}, 64),
 	}
 	tc.parser = NewMessageParser(func(msgType byte, payload []byte) {
-		tc.frameC <- struct{ typ byte; payload []byte }{msgType, payload}
+		tc.frameC <- struct {
+			typ     byte
+			payload []byte
+		}{msgType, payload}
 	})
 	go func() {
 		buf := make([]byte, 4096)
@@ -162,7 +171,11 @@ func (tc *testClient) readFrame(t *testing.T) (typ byte, payload []byte) {
 
 // send writes a framed message to the server.
 func (tc *testClient) send(msgType byte, payload []byte) error {
-	_, err := tc.conn.Write(EncodeMessage(msgType, payload))
+	frame, err := EncodeMessage(msgType, payload)
+	if err != nil {
+		return err
+	}
+	_, err = tc.conn.Write(frame)
 	return err
 }
 
@@ -272,10 +285,6 @@ func TestScrollbackLiveOrdering_NoDrop(t *testing.T) {
 	// well as the live-broadcast boundary where the drop bug lived.
 	const nChunks = 300
 	chunk := func(i int) []byte { return []byte(fmt.Sprintf("[%04d]\n", i)) }
-	var full []byte
-	for i := 0; i < nChunks; i++ {
-		full = append(full, chunk(i)...)
-	}
 
 	// Emit continuously; each WriteOutput blocks until pumpPTY reads it.
 	emitDone := make(chan struct{})
@@ -336,7 +345,7 @@ collect:
 	if lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
-	var prev int = -1
+	prev := -1
 	for li, line := range lines {
 		var idx int
 		if _, err := fmt.Sscanf(line, "[%04d]", &idx); err != nil {

@@ -38,7 +38,7 @@ func clientSendMessage(addr, message string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	runes := []rune(message)
 	for i := 0; i < len(runes); i += ptyInputChunkRunes {
@@ -47,7 +47,10 @@ func clientSendMessage(addr, message string) error {
 			end = len(runes)
 		}
 		chunk := string(runes[i:end])
-		frame := EncodeMessage(MsgTerminalInput, []byte(chunk))
+		frame, err := EncodeMessage(MsgTerminalInput, []byte(chunk))
+		if err != nil {
+			return err
+		}
 		if _, err := conn.Write(frame); err != nil {
 			return err
 		}
@@ -59,7 +62,10 @@ func clientSendMessage(addr, message string) error {
 
 	// Brief pause before Enter (matches TS: Enter sent as a separate frame).
 	time.Sleep(ptyInputEnterDelay)
-	frame := EncodeMessage(MsgTerminalInput, []byte("\r"))
+	frame, err := EncodeMessage(MsgTerminalInput, []byte("\r"))
+	if err != nil {
+		return err
+	}
 	_, err = conn.Write(frame)
 	return err
 }
@@ -72,12 +78,13 @@ func clientGetOutput(addr string, lines int) (string, error) {
 	if err != nil {
 		return "", nil // ponytail: connect failure -> "" like the TS
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	_ = conn.SetDeadline(time.Now().Add(getOutputTimeout))
 
 	req, _ := json.Marshal(GetOutputReq{Lines: lines})
-	if _, err := conn.Write(EncodeMessage(MsgGetOutputReq, req)); err != nil {
+	reqFrame, _ := EncodeMessage(MsgGetOutputReq, req) // req is small JSON, never overflows uint32
+	if _, err := conn.Write(reqFrame); err != nil {
 		return "", nil
 	}
 
@@ -142,11 +149,12 @@ func clientIsAlive(addr string) (alive bool, transientErr error) {
 		}
 		return false, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	_ = conn.SetDeadline(time.Now().Add(isAliveTimeout))
 
-	if _, err := conn.Write(EncodeMessage(MsgStatusReq, nil)); err != nil {
+	statusReqFrame, _ := EncodeMessage(MsgStatusReq, nil) // nil payload, never overflows
+	if _, err := conn.Write(statusReqFrame); err != nil {
 		// We connected, then the write failed: connected-then-failed I/O is
 		// transient (the host may still be up; the conn was disrupted).
 		return false, err
@@ -186,10 +194,7 @@ func clientIsAlive(addr string) (alive bool, transientErr error) {
 		return result, nil
 	default:
 		// Connected but never got a STATUS_RES: read timeout or mid-read EOF.
-		// This is a connected-then-failed I/O error -> transient.
-		if lastErr == nil {
-			lastErr = errors.New("conpty: no status response before connection ended")
-		}
+		// lastErr is the error that broke the read loop (always non-nil here).
 		return false, lastErr
 	}
 }
@@ -220,8 +225,9 @@ func clientKill(addr string) error {
 	if err != nil {
 		return nil // already dead
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(isAliveTimeout))
-	_, _ = conn.Write(EncodeMessage(MsgKillReq, nil))
+	killFrame, _ := EncodeMessage(MsgKillReq, nil) // nil payload, never overflows
+	_, _ = conn.Write(killFrame)
 	return nil
 }

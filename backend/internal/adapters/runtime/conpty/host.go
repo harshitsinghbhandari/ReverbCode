@@ -19,10 +19,10 @@ import (
 // ptyConn is the host's handle to the running agent's pseudo-terminal.
 // The real impl (conptyConn) lives in host_conpty_windows.go; tests use a fake.
 type ptyConn interface {
-	io.Reader            // PTY output (raw bytes from the terminal)
-	io.Writer            // PTY input (keystrokes to the terminal)
+	io.Reader // PTY output (raw bytes from the terminal)
+	io.Writer // PTY input (keystrokes to the terminal)
 	Resize(cols, rows int) error
-	Close() error        // dispose the ConPTY
+	Close() error          // dispose the ConPTY
 	Done() <-chan struct{} // closed when the child process exits
 	ExitCode() (int, bool) // (code, true) once exited; (0, false) while running
 	PID() int
@@ -43,8 +43,8 @@ type ServeConfig struct {
 // but stays alive (keep-alive, mirroring tmux behavior). Returns when shut down.
 func Serve(ctx context.Context, cfg ServeConfig) error {
 	h := &host{
-		cfg:      cfg,
-		clients:  make(map[net.Conn]struct{}),
+		cfg:       cfg,
+		clients:   make(map[net.Conn]struct{}),
 		shutdownC: make(chan struct{}),
 	}
 	return h.run(ctx)
@@ -52,9 +52,9 @@ func Serve(ctx context.Context, cfg ServeConfig) error {
 
 // host holds the mutable state for a single pty-host session.
 type host struct {
-	cfg      ServeConfig
-	mu       sync.Mutex
-	clients  map[net.Conn]struct{}
+	cfg     ServeConfig
+	mu      sync.Mutex
+	clients map[net.Conn]struct{}
 
 	shutdownOnce sync.Once
 	shutdownC    chan struct{} // closed when Shutdown is called
@@ -74,12 +74,19 @@ func (h *host) run(ctx context.Context) error {
 		}
 	}()
 
-	// Accept loop.
+	// runAcceptLoop accepts connections until the listener closes. A listener
+	// close is normal (shutdown or external) and is treated as success.
+	h.runAcceptLoop()
+	return nil
+}
+
+// runAcceptLoop runs the Accept loop until the listener closes or returns an
+// error. Listener-close errors are swallowed; they signal normal shutdown.
+func (h *host) runAcceptLoop() {
 	for {
 		conn, err := h.cfg.Listener.Accept()
 		if err != nil {
-			// Listener closed: either shutdown or external close.
-			return nil
+			return
 		}
 		go h.handleConn(conn)
 	}
@@ -124,7 +131,9 @@ func (h *host) pumpPTY() {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
 			h.cfg.Ring.Append(chunk)
-			h.broadcast(EncodeMessage(MsgTerminalData, chunk))
+			if frame, err := EncodeMessage(MsgTerminalData, chunk); err == nil {
+				h.broadcast(frame)
+			}
 		}
 		if err != nil {
 			break
@@ -181,7 +190,11 @@ func (h *host) handleConn(conn net.Conn) {
 	h.mu.Lock()
 	snap := h.cfg.Ring.Snapshot()
 	if len(snap) > 0 {
-		if _, err := conn.Write(EncodeMessage(MsgTerminalData, snap)); err != nil {
+		snapFrame, err := EncodeMessage(MsgTerminalData, snap)
+		if err == nil {
+			_, err = conn.Write(snapFrame)
+		}
+		if err != nil {
 			h.mu.Unlock()
 			_ = conn.Close()
 			return
@@ -238,7 +251,9 @@ func (h *host) handleClientMsg(conn net.Conn, msgType byte, payload []byte) {
 			lines = req.Lines
 		}
 		text := h.cfg.Ring.Tail(lines)
-		h.sendTo(conn, EncodeMessage(MsgGetOutputRes, []byte(text)))
+		if frame, err := EncodeMessage(MsgGetOutputRes, []byte(text)); err == nil {
+			h.sendTo(conn, frame)
+		}
 
 	case MsgStatusReq:
 		code, exited := h.cfg.PTY.ExitCode()
@@ -260,5 +275,6 @@ func (h *host) handleClientMsg(conn net.Conn, msgType byte, payload []byte) {
 func statusFrame(alive bool, pid int, exitCode *int) []byte {
 	sp := StatusPayload{Alive: alive, PID: pid, ExitCode: exitCode}
 	b, _ := json.Marshal(sp)
-	return EncodeMessage(MsgStatusRes, b)
+	frame, _ := EncodeMessage(MsgStatusRes, b) // b is small JSON, never overflows uint32
+	return frame
 }

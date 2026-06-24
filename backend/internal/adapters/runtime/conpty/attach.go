@@ -90,7 +90,11 @@ func (s *loopbackStream) pump() {
 func (s *loopbackStream) Read(p []byte) (int, error) { return s.pr.Read(p) }
 
 func (s *loopbackStream) Write(p []byte) (int, error) {
-	if _, err := s.conn.Write(EncodeMessage(MsgTerminalInput, p)); err != nil {
+	frame, err := EncodeMessage(MsgTerminalInput, p)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := s.conn.Write(frame); err != nil {
 		return 0, err
 	}
 	return len(p), nil
@@ -98,7 +102,11 @@ func (s *loopbackStream) Write(p []byte) (int, error) {
 
 func (s *loopbackStream) Resize(rows, cols uint16) error {
 	payload, _ := json.Marshal(ResizePayload{Cols: int(cols), Rows: int(rows)})
-	_, err := s.conn.Write(EncodeMessage(MsgResize, payload))
+	frame, err := EncodeMessage(MsgResize, payload) // small JSON payload, never overflows uint32
+	if err != nil {
+		return err
+	}
+	_, err = s.conn.Write(frame)
 	return err
 }
 

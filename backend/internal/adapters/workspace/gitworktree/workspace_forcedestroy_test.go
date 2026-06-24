@@ -15,8 +15,8 @@ import (
 // file (which normal Destroy refuses via ErrWorkspaceDirty), then calls
 // ForceDestroy and asserts:
 //
-//  (a) the worktree path no longer exists on disk.
-//  (b) the worktree is deregistered from `git worktree list`.
+//	(a) the worktree path no longer exists on disk.
+//	(b) the worktree is deregistered from `git worktree list`.
 func TestWorkspaceIntegrationForceDestroyDirtyWorktree(t *testing.T) {
 	git := requireGit(t)
 	tmp := t.TempDir()

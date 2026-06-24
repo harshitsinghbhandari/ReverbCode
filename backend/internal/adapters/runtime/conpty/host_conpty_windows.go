@@ -13,8 +13,8 @@ import (
 // conptyConn is the real ptyConn implementation backed by go-pty's ConPty
 // (Windows ConPTY API). Only compiled on Windows.
 type conptyConn struct {
-	pty  gopty.ConPty
-	cmd  *gopty.Cmd
+	pty gopty.ConPty
+	cmd *gopty.Cmd
 
 	once     sync.Once
 	doneC    chan struct{}
@@ -87,8 +87,8 @@ func (c *conptyConn) Close() error {
 	}
 	return err
 }
-func (c *conptyConn) Resize(cols, rows int) error  { return c.pty.Resize(cols, rows) }
-func (c *conptyConn) Done() <-chan struct{}         { return c.doneC }
+func (c *conptyConn) Resize(cols, rows int) error { return c.pty.Resize(cols, rows) }
+func (c *conptyConn) Done() <-chan struct{}       { return c.doneC }
 func (c *conptyConn) PID() int {
 	if c.cmd.Process == nil {
 		return 0

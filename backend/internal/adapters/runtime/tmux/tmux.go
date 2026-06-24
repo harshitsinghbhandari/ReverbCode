@@ -116,7 +116,7 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 		return ports.RuntimeHandle{}, err
 	}
 
-	launchCmd := buildLaunchCommand(cfg, r.shell)
+	launchCmd := buildLaunchCommand(cfg)
 	args := newSessionArgs(id, cfg.WorkspacePath, r.shell, launchCmd)
 	if _, err := r.run(ctx, args...); err != nil {
 		return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s: %w", id, err)
@@ -232,21 +232,21 @@ func (r *Runtime) GetOutput(ctx context.Context, handle ports.RuntimeHandle, lin
 // local PTY, sized rows x cols from birth when known. ctx cancellation closes
 // the PTY.
 func (r *Runtime) Attach(ctx context.Context, handle ports.RuntimeHandle, rows, cols uint16) (ports.Stream, error) {
-	argv, env, err := r.attachCommand(handle)
+	argv, err := r.attachCommand(handle)
 	if err != nil {
 		return nil, err
 	}
-	return ptyexec.Spawn(ctx, argv, env, rows, cols)
+	return ptyexec.Spawn(ctx, argv, nil, rows, cols)
 }
 
-// attachCommand returns the argv a human runs to attach their terminal to the
-// session. tmux needs no per-session env block, so env is always nil.
-func (r *Runtime) attachCommand(handle ports.RuntimeHandle) ([]string, []string, error) {
+// attachCommand returns the argv to attach a terminal to the session.
+// tmux needs no per-session env block.
+func (r *Runtime) attachCommand(handle ports.RuntimeHandle) ([]string, error) {
 	id, err := handleID(handle)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return []string{r.binary, "attach-session", "-t", id}, nil, nil
+	return []string{r.binary, "attach-session", "-t", id}, nil
 }
 
 // run wraps runner.Run with a per-call timeout context.
@@ -436,13 +436,13 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-// buildLaunchCommand builds the shell command string passed to `sh -c` (or the
-// configured shell). It exports env vars, then runs argv, then execs a
-// keep-alive interactive shell so the tmux session survives the agent exiting.
+// buildLaunchCommand builds the shell command string passed to `sh -c`. It
+// exports env vars, then runs argv, then execs a keep-alive interactive shell
+// so the tmux session survives the agent exiting.
 //
 // PATH from cfg.Env is exported last, after all other keys, so an explicit
 // override takes effect.
-func buildLaunchCommand(cfg ports.RuntimeConfig, shellPath string) string {
+func buildLaunchCommand(cfg ports.RuntimeConfig) string {
 	path := cfg.Env["PATH"]
 	if path == "" {
 		path = getenv("PATH")

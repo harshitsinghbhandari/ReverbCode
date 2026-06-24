@@ -9,7 +9,10 @@ import (
 // TestEncodeMessage verifies the 5-byte header and payload are written correctly.
 func TestEncodeMessage(t *testing.T) {
 	payload := []byte("hello")
-	frame := EncodeMessage(MsgTerminalData, payload)
+	frame, err := EncodeMessage(MsgTerminalData, payload)
+	if err != nil {
+		t.Fatalf("EncodeMessage: %v", err)
+	}
 
 	if len(frame) != 5+len(payload) {
 		t.Fatalf("frame len = %d, want %d", len(frame), 5+len(payload))
@@ -28,7 +31,10 @@ func TestEncodeMessage(t *testing.T) {
 
 // TestEncodeMessageZeroPayload verifies a zero-length payload encodes correctly.
 func TestEncodeMessageZeroPayload(t *testing.T) {
-	frame := EncodeMessage(MsgStatusReq, nil)
+	frame, err := EncodeMessage(MsgStatusReq, nil)
+	if err != nil {
+		t.Fatalf("EncodeMessage: %v", err)
+	}
 	if len(frame) != 5 {
 		t.Fatalf("frame len = %d, want 5", len(frame))
 	}
@@ -57,7 +63,8 @@ func TestParserSingleFrame(t *testing.T) {
 	var got []collected
 	p := NewMessageParser(collect(&got))
 
-	p.Feed(EncodeMessage(MsgTerminalData, []byte("hi")))
+	f, _ := EncodeMessage(MsgTerminalData, []byte("hi"))
+	p.Feed(f)
 
 	if len(got) != 1 {
 		t.Fatalf("got %d messages, want 1", len(got))
@@ -75,8 +82,9 @@ func TestParserTwoFramesOneChunk(t *testing.T) {
 	var got []collected
 	p := NewMessageParser(collect(&got))
 
-	chunk := append(EncodeMessage(MsgTerminalData, []byte("frame1")),
-		EncodeMessage(MsgTerminalInput, []byte("frame2"))...)
+	f1, _ := EncodeMessage(MsgTerminalData, []byte("frame1"))
+	f2, _ := EncodeMessage(MsgTerminalInput, []byte("frame2"))
+	chunk := append(f1, f2...)
 	p.Feed(chunk)
 
 	if len(got) != 2 {
@@ -96,7 +104,7 @@ func TestParserByteAtATime(t *testing.T) {
 	var got []collected
 	p := NewMessageParser(collect(&got))
 
-	frame := EncodeMessage(MsgResize, []byte(`{"cols":80,"rows":24}`))
+	frame, _ := EncodeMessage(MsgResize, []byte(`{"cols":80,"rows":24}`))
 	for _, b := range frame {
 		p.Feed([]byte{b})
 	}
@@ -120,7 +128,8 @@ func TestParserInterleavedTypes(t *testing.T) {
 
 	var chunk []byte
 	for i, typ := range types {
-		chunk = append(chunk, EncodeMessage(typ, payloads[i])...)
+		f, _ := EncodeMessage(typ, payloads[i])
+		chunk = append(chunk, f...)
 	}
 
 	var got []collected
@@ -151,7 +160,7 @@ func TestParserPayloadIsCopy(t *testing.T) {
 	p := NewMessageParser(collect(&got))
 
 	// Feed frame1 and capture the delivered payload pointer.
-	frame1 := EncodeMessage(MsgTerminalData, []byte("original"))
+	frame1, _ := EncodeMessage(MsgTerminalData, []byte("original"))
 	p.Feed(frame1)
 	if len(got) != 1 {
 		t.Fatalf("after frame1: got %d messages, want 1", len(got))
@@ -160,7 +169,7 @@ func TestParserPayloadIsCopy(t *testing.T) {
 
 	// Feed frame2 with the same payload length so the parser's internal buffer
 	// overwrites the exact byte range that frame1 occupied.
-	frame2 := EncodeMessage(MsgTerminalInput, []byte("XXXXXXXX")) // same len as "original"
+	frame2, _ := EncodeMessage(MsgTerminalInput, []byte("XXXXXXXX")) // same len as "original"
 	p.Feed(frame2)
 	if len(got) != 2 {
 		t.Fatalf("after frame2: got %d messages, want 2", len(got))
@@ -176,7 +185,8 @@ func TestParserPayloadIsCopy(t *testing.T) {
 func TestParserZeroLengthFrame(t *testing.T) {
 	var got []collected
 	p := NewMessageParser(collect(&got))
-	p.Feed(EncodeMessage(MsgStatusReq, nil))
+	f, _ := EncodeMessage(MsgStatusReq, nil)
+	p.Feed(f)
 
 	if len(got) != 1 {
 		t.Fatalf("got %d messages, want 1", len(got))

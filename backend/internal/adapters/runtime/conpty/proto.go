@@ -5,7 +5,11 @@
 // Frame layout: [1-byte type][4-byte big-endian length][payload]
 package conpty
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+	"math"
+)
 
 // Message type constants. Values must match pty-host.ts MSG_* constants exactly.
 const (
@@ -41,12 +45,18 @@ type GetOutputReq struct {
 
 // EncodeMessage encodes a single frame into the binary protocol format.
 // It allocates a fresh slice of exactly 5+len(payload) bytes.
-func EncodeMessage(msgType byte, payload []byte) []byte {
-	frame := make([]byte, 5+len(payload))
+// Returns an error if the payload exceeds the 4-byte length field capacity.
+func EncodeMessage(msgType byte, payload []byte) ([]byte, error) {
+	n := len(payload)
+	if n > math.MaxUint32 {
+		return nil, fmt.Errorf("conpty: payload too large (%d bytes, max %d)", n, math.MaxUint32)
+	}
+	payloadLen := uint32(n) // safe: n <= math.MaxUint32 checked above
+	frame := make([]byte, 5+n)
 	frame[0] = msgType
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload)))
+	binary.BigEndian.PutUint32(frame[1:5], payloadLen)
 	copy(frame[5:], payload)
-	return frame
+	return frame, nil
 }
 
 // MessageParser is a streaming parser for the binary framing protocol.

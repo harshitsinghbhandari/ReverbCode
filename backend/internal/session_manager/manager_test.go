@@ -214,10 +214,10 @@ type missingAgents struct{}
 func (missingAgents) Agent(domain.AgentHarness) (ports.Agent, bool) { return nil, false }
 
 type fakeWorkspace struct {
-	createErr    error
-	destroyErr   error
-	destroyed    int
-	lastCfg      ports.WorkspaceConfig
+	createErr  error
+	destroyErr error
+	destroyed  int
+	lastCfg    ports.WorkspaceConfig
 	// path, when set, is returned as the workspace path so provisioning tests
 	// can point at a real temp directory.
 	path string

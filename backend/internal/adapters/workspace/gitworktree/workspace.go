@@ -273,11 +273,11 @@ func (w *Workspace) StashUncommitted(ctx context.Context, info ports.WorkspaceIn
 		return "", fmt.Errorf("gitworktree: reserve temp index path: %w", err)
 	}
 	tmpIdxPath := tmpIdx.Name()
-	tmpIdx.Close()
+	_ = tmpIdx.Close()
 	// Remove now so git sees an absent path (not a 0-byte corrupt index).
 	_ = os.Remove(tmpIdxPath)
 	// Deferred remove is a best-effort cleanup in case git leaves the file.
-	defer os.Remove(tmpIdxPath)
+	defer func() { _ = os.Remove(tmpIdxPath) }()
 
 	// Stage all tracked and non-ignored untracked files into the temp index.
 	// GIT_INDEX_FILE overrides the index so the real index is never touched.

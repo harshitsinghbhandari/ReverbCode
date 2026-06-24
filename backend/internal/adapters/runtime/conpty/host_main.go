@@ -41,7 +41,13 @@ func RunHost(args []string, stdout io.Writer) int {
 		fmt.Fprintf(os.Stderr, "pty-host [%s]: listen: %v\n", sessionID, err)
 		return 1
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		fmt.Fprintf(os.Stderr, "pty-host [%s]: listener is not TCP\n", sessionID)
+		return 1
+	}
+	port := tcpAddr.Port
 
 	pty, err := newConPTY(cwd, shellCmd, shellArgs)
 	if err != nil {
@@ -51,7 +57,7 @@ func RunHost(args []string, stdout io.Writer) int {
 	}
 
 	// Print READY after both the listener and the PTY are up.
-	fmt.Fprintf(stdout, "READY:%d %d\n", pty.PID(), port)
+	_, _ = fmt.Fprintf(stdout, "READY:%d %d\n", pty.PID(), port)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -40,7 +40,6 @@ func (f *fakeRunner) Run(_ context.Context, env []string, name string, args ...s
 	return out, nil
 }
 
-
 // -- helpers --
 
 func newTestRuntime(chunkSize int) (*Runtime, *fakeRunner) {
@@ -321,7 +320,6 @@ func (f *fakeRunnerSelectiveErr) Run(_ context.Context, env []string, name strin
 	return out, nil
 }
 
-
 // -- Destroy tests --
 
 func TestDestroyIsIdempotentWhenSessionMissing(t *testing.T) {
@@ -535,7 +533,7 @@ func TestGetOutputArgs(t *testing.T) {
 
 func TestAttachCommandReturnsExpectedArgv(t *testing.T) {
 	r := New(Options{Binary: "/usr/bin/tmux", Timeout: time.Second})
-	argv, env, err := r.attachCommand(ports.RuntimeHandle{ID: "sess-1"})
+	argv, err := r.attachCommand(ports.RuntimeHandle{ID: "sess-1"})
 	if err != nil {
 		t.Fatalf("AttachCommand: %v", err)
 	}
@@ -543,14 +541,11 @@ func TestAttachCommandReturnsExpectedArgv(t *testing.T) {
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("argv = %#v, want %#v", argv, want)
 	}
-	if env != nil {
-		t.Fatalf("env = %#v, want nil", env)
-	}
 }
 
 func TestAttachCommandRejectsInvalidHandle(t *testing.T) {
 	r := New(Options{})
-	_, _, err := r.attachCommand(ports.RuntimeHandle{ID: ""})
+	_, err := r.attachCommand(ports.RuntimeHandle{ID: ""})
 	if err == nil {
 		t.Fatal("AttachCommand empty handle: got nil, want error")
 	}
@@ -572,7 +567,7 @@ func TestCommandErrorUnwraps(t *testing.T) {
 // -- text helper tests --
 
 func TestChunks(t *testing.T) {
-	if got := chunks("", 5); !reflect.DeepEqual(got, []string{""}){
+	if got := chunks("", 5); !reflect.DeepEqual(got, []string{""}) {
 		t.Fatalf("chunks empty = %#v", got)
 	}
 	if got := chunks("hello", 10); !reflect.DeepEqual(got, []string{"hello"}) {

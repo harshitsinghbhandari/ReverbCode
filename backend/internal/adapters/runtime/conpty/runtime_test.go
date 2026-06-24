@@ -664,13 +664,5 @@ func TestClientKill_Idempotent(t *testing.T) {
 	}
 }
 
-// helper for TestSendMessage_LargeMessageChunked
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // Ensure the packages compile (import check).
 var _ = io.Discard

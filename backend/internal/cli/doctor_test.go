@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,9 @@ func TestDoctorFailsWhenGitMissing(t *testing.T) {
 }
 
 func TestDoctorChecksTmuxVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ao doctor emits a conpty check on Windows, not tmux")
+	}
 	setConfigEnv(t)
 	c := doctorContext(t, map[string]string{"git": "/bin/git", "tmux": "/bin/tmux"}, func(_ context.Context, name string, args ...string) ([]byte, error) {
 		switch name {
@@ -78,6 +82,9 @@ func TestDoctorChecksTmuxVersion(t *testing.T) {
 // TestDoctorChecksTmuxVersionFailsOnError covers the case where tmux is found
 // but the version command fails.
 func TestDoctorChecksTmuxVersionFailsOnError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ao doctor emits a conpty check on Windows, not tmux")
+	}
 	setConfigEnv(t)
 	c := doctorContext(t, map[string]string{"git": "/bin/git", "tmux": "/bin/tmux"}, func(_ context.Context, name string, _ ...string) ([]byte, error) {
 		if name == "/bin/git" {
@@ -93,6 +100,9 @@ func TestDoctorChecksTmuxVersionFailsOnError(t *testing.T) {
 }
 
 func TestDoctorWarnsWhenTmuxMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ao doctor emits a conpty check on Windows, not tmux")
+	}
 	setConfigEnv(t)
 	c := doctorContext(t, map[string]string{"git": "/bin/git"}, func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("git version 2.43.0\n"), nil
