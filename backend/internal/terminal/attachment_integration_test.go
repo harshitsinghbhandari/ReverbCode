@@ -23,6 +23,8 @@ func TestAttachmentStreamsRealTmuxPane(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux unavailable")
 	}
+	// See TestAttachmentReattachAdoptsNewSize: tmux needs a usable TERM to attach.
+	t.Setenv("TERM", "xterm-256color")
 
 	name := "ao-term-it-" + strconv.Itoa(os.Getpid())
 	rt := tmux.New(tmux.Options{Timeout: 10 * time.Second})
@@ -61,6 +63,11 @@ func TestAttachmentReattachAdoptsNewSize(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux unavailable")
 	}
+	// tmux refuses to attach a client without a usable TERM, printing
+	// "open terminal failed: terminal does not support clear". The daemon sets a
+	// default TERM in production (Finder-launched attach fix); CI runners have
+	// none, so set it here to match the real environment.
+	t.Setenv("TERM", "xterm-256color")
 
 	name := "ao-term-size-it-" + strconv.Itoa(os.Getpid())
 	rt := tmux.New(tmux.Options{Timeout: 10 * time.Second})
