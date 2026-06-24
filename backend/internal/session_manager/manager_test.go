@@ -26,6 +26,9 @@ type fakeStore struct {
 	deleteErr error
 	// worktrees maps session ID to its saved worktree rows (shutdown-saved marker).
 	worktrees map[domain.SessionID][]domain.SessionWorktreeRecord
+	// sharedLog, when non-nil, receives an ordered call entry for each
+	// UpsertSessionWorktree invocation so ordering tests can compare across fakes.
+	sharedLog *[]string
 }
 
 func newFakeStore() *fakeStore {
@@ -92,6 +95,9 @@ func (f *fakeStore) GetDisplayPRFactsForSession(_ context.Context, id domain.Ses
 	return domain.PRFacts{}, false, nil
 }
 func (f *fakeStore) UpsertSessionWorktree(_ context.Context, row domain.SessionWorktreeRecord) error {
+	if f.sharedLog != nil {
+		*f.sharedLog = append(*f.sharedLog, "UpsertSessionWorktree:"+string(row.SessionID))
+	}
 	rows := f.worktrees[row.SessionID]
 	for i, r := range rows {
 		if r.RepoName == row.RepoName {
@@ -216,12 +222,15 @@ type fakeWorkspace struct {
 	// can point at a real temp directory.
 	path string
 	// stashRef is returned by StashUncommitted (empty means clean worktree).
-	stashRef    string
-	stashErr    error
-	applyErr    error
+	stashRef        string
+	stashErr        error
+	applyErr        error
 	forceDestroyErr error
 	// calls records the sequence of workspace method calls for ordering assertions.
 	calls []string
+	// sharedLog, when non-nil, receives entries alongside calls so ordering
+	// tests can compare workspace calls against store calls in one sequence.
+	sharedLog *[]string
 }
 
 func (w *fakeWorkspace) Create(_ context.Context, cfg ports.WorkspaceConfig) (ports.WorkspaceInfo, error) {
@@ -243,11 +252,19 @@ func (w *fakeWorkspace) Restore(ctx context.Context, cfg ports.WorkspaceConfig) 
 	return w.Create(ctx, cfg)
 }
 func (w *fakeWorkspace) ForceDestroy(_ context.Context, info ports.WorkspaceInfo) error {
-	w.calls = append(w.calls, "ForceDestroy:"+string(info.SessionID))
+	entry := "ForceDestroy:" + string(info.SessionID)
+	w.calls = append(w.calls, entry)
+	if w.sharedLog != nil {
+		*w.sharedLog = append(*w.sharedLog, entry)
+	}
 	return w.forceDestroyErr
 }
 func (w *fakeWorkspace) StashUncommitted(_ context.Context, info ports.WorkspaceInfo) (string, error) {
-	w.calls = append(w.calls, "StashUncommitted:"+string(info.SessionID))
+	entry := "StashUncommitted:" + string(info.SessionID)
+	w.calls = append(w.calls, entry)
+	if w.sharedLog != nil {
+		*w.sharedLog = append(*w.sharedLog, entry)
+	}
 	return w.stashRef, w.stashErr
 }
 func (w *fakeWorkspace) ApplyPreserved(_ context.Context, info ports.WorkspaceInfo, ref string) error {
@@ -1145,6 +1162,13 @@ func newLifecycleManager() (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace) 
 // UpsertSessionWorktree (writing preserved_ref) BEFORE ForceDestroy.
 func TestSaveAndTeardownAll_CaptureOrderAndMarker(t *testing.T) {
 	m, st, _, ws := newLifecycleManager()
+
+	// Wire a shared ordered call log so we can assert cross-fake ordering:
+	// both fakeStore and fakeWorkspace append to the same slice.
+	var sharedLog []string
+	st.sharedLog = &sharedLog
+	ws.sharedLog = &sharedLog
+
 	// A live session with a workspace path and runtime handle.
 	ws.stashRef = "refs/ao/preserved/mer-1"
 	st.sessions["mer-1"] = domain.SessionRecord{
@@ -1179,8 +1203,28 @@ func TestSaveAndTeardownAll_CaptureOrderAndMarker(t *testing.T) {
 		t.Fatalf("StashUncommitted (call %d) must come before ForceDestroy (call %d)", stashIdx, forceIdx)
 	}
 
-	// DB write (UpsertSessionWorktree) must happen before ForceDestroy:
-	// the worktree row must be present for the session.
+	// UpsertSessionWorktree (DB write) must be committed BEFORE ForceDestroy.
+	// Use the shared ordered log to compare positions across the store and workspace.
+	upsertIdx, sharedForceIdx := -1, -1
+	for i, c := range sharedLog {
+		if c == "UpsertSessionWorktree:mer-1" {
+			upsertIdx = i
+		}
+		if c == "ForceDestroy:mer-1" {
+			sharedForceIdx = i
+		}
+	}
+	if upsertIdx == -1 {
+		t.Fatal("UpsertSessionWorktree was not called")
+	}
+	if sharedForceIdx == -1 {
+		t.Fatal("ForceDestroy was not recorded in shared log")
+	}
+	if upsertIdx >= sharedForceIdx {
+		t.Fatalf("UpsertSessionWorktree (pos %d) must come before ForceDestroy (pos %d) in shared call log %v", upsertIdx, sharedForceIdx, sharedLog)
+	}
+
+	// DB write (UpsertSessionWorktree) must have recorded the correct row.
 	rows := st.worktrees["mer-1"]
 	if len(rows) == 0 {
 		t.Fatal("UpsertSessionWorktree was not called: no worktree row for mer-1")
