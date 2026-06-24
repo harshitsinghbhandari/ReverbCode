@@ -56,43 +56,51 @@ A single idempotent pass that **replaces** the bare `RestoreAll` call at
 `daemon.go:147`, run before the server starts serving. It folds the existing
 restore logic in as one branch. Iterating `ListAllSessions`:
 
-| DB state                          | tmux via `IsAlive(handle)` | Action                                                              |
-| --------------------------------- | -------------------------- | ------------------------------------------------------------------ |
-| `is_terminated=0`                 | alive                      | **Adopt** — no-op, leave live. Agent keeps running.                |
-| `is_terminated=0`                 | gone                       | `StashUncommitted` (best-effort) -> `MarkTerminated`. No relaunch. |
-| `is_terminated=1`, has marker     | (n/a)                      | Existing `RestoreAll` restore branch, unchanged.                   |
-| `is_terminated=1`, no marker      | (n/a)                      | Leave terminated (user-killed before shutdown; untouched).         |
+Reconcile iterates `ListAllSessions` and acts per session:
+
+| DB state                      | tmux via `IsAlive(handle)` | Action                                                              |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------------ |
+| `is_terminated=0`             | alive                      | **Adopt** — no-op, leave live. Agent keeps running.                |
+| `is_terminated=0`             | gone                       | `StashUncommitted` (best-effort) -> `MarkTerminated`. No relaunch. |
+| `is_terminated=1`             | alive                      | **Reap** — `Destroy` the leaked tmux session.                      |
+| `is_terminated=1`, has marker | gone                       | Existing `RestoreAll` restore branch, unchanged.                   |
+| `is_terminated=1`, no marker  | gone                       | Leave terminated (user-killed before shutdown; untouched).         |
 
 Adoption is safe and lossless because tmux is the persistence layer: the
 detached tmux session survives a daemon crash, and the session's
 `runtime_handle_id` (the tmux session name) is in the DB. A matching live
 handle means the session genuinely survived; adopting is a no-op.
 
-After the per-session pass, **orphan-reap** using a new `Runtime.ListSessions`.
-The reap is **scoped to this daemon's session-id namespace** (the project
-session-id prefix, e.g. `ao-agents-`): a tmux name outside that namespace is
-never touched, which is what keeps a co-resident AO install's sessions
-(observed: `aa-107`, `aa-109` from a different install on the same host) safe.
-Within the namespace, for every live tmux session whose name maps to **no
-`is_terminated=0` DB row** (a terminated row, or no row at all) -> `Destroy`
-it.
+The **reap** of a terminated-but-still-alive tmux session uses the existing
+per-handle `IsAlive` + `Destroy`; no session enumeration is needed because
+every leak tied to a session has a DB row (confirmed for the incident: 9, 11,
+12 all have rows). Reap must run **before** the restore branch so a restored
+session gets a fresh runtime rather than colliding with a leaked tmux of the
+same name.
 
-Worktrees: a terminated session's worktree is pruned **only if it is clean and
-registered-but-dead**; **dirty worktrees are always preserved** (this is why an
+Worktrees: dirty worktrees are **always preserved** (this is why an
 intentionally-preserved dirty worktree like session 9 survives — correct, by
 design; matches the interactive `Destroy` `ErrWorkspaceDirty` refusal).
+Reconcile does not delete worktree directories; worktree lifecycle stays with
+the existing teardown/restore/cleanup paths.
 
-### Component 2 — `Runtime.ListSessions(ctx) ([]string, error)` (port addition)
+### Component 2 — order of operations
 
-The only new surface on the `ports.Runtime` interface
-(`backend/internal/ports/outbound.go`).
+`Reconcile` runs three phases over `ListAllSessions`, in order:
 
-- tmux: `tmux list-sessions -F '#{session_name}'`. An empty list (no server /
-  no sessions) is returned as an empty slice and **no error**, mirroring the
-  existing `has-session` missing-output handling.
-- conpty: return an empty slice (no persistent enumeration model). Reconcile's
-  orphan-reap is therefore a tmux-only effect, which is correct: only tmux
-  sessions outlive the daemon.
+1. **Live pass** (`is_terminated=0`): adopt if `IsAlive`, else stash +
+   `MarkTerminated`.
+2. **Reap pass** (`is_terminated=1` with live tmux): `Destroy` the leaked
+   session.
+3. **Restore pass**: the existing `RestoreAll` body (terminated + marked
+   sessions), unchanged.
+
+Deferred (YAGNI): reaping a tmux session that has **no DB row at all** (a true
+orphan). Not observed in the incident and not reachable through normal spawn
+(every tmux session is created for a DB-backed session). If it ever appears, it
+is a follow-up that adds a `Runtime.ListSessions` enumerator scoped to this
+daemon's session-id namespace (so a co-resident AO install's sessions —
+observed: `aa-107`, `aa-109` — stay untouched). Out of scope here.
 
 ### Component 3 — Frontend "replace wedged orphan" branch
 
@@ -110,7 +118,7 @@ reconnected exactly as today, untouched.
 - A future crash where tmux also died -> work stashed, marked terminated, no
   orphan left.
 - Orphan daemon on next launch -> reused if healthy, else killed + replaced.
-- Orphan tmux with no live owner -> reaped.
+- A terminated session whose tmux survived teardown -> reaped (`Destroy`).
 - Dirty worktrees (like 9) -> preserved.
 
 ## Error handling
@@ -126,21 +134,19 @@ reconnected exactly as today, untouched.
 
 ## Testing
 
-- Unit: table-test `Reconcile` over each matrix row with a fake runtime
-  (alive / gone / orphan), asserting DB transitions and runtime `Destroy`
+- Unit: table-test `Reconcile` over each matrix row with a fake runtime whose
+  `IsAlive` is scriptable per handle (alive / gone), asserting DB transitions
+  (`MarkTerminated`), `StashUncommitted` calls, and runtime `Destroy` (reap)
   calls.
-- Unit: `ListSessions` argument building and missing-output parsing, mirroring
-  the existing tmux `has-session` tests.
+- Unit: assert the live pass adopts (no `Destroy`, no `MarkTerminated`) when
+  `IsAlive` is true.
 - Integration: extend the sqlite lifecycle test with a seeded
-  `is_terminated=0`-but-dead session plus an orphan tmux name; assert the
-  post-reconcile DB state and the kill calls.
+  `is_terminated=0`-but-dead session and a `is_terminated=1`-but-alive session;
+  assert the post-reconcile DB state and the reap `Destroy` call.
 
-## Open question flagged for review
+## Open question (resolved during planning)
 
-Orphan-reap namespace scoping: the design reaps in-namespace tmux names that
-have no live DB owner, including names with no DB row at all. The namespace
-prefix (e.g. `ao-agents-`) is what protects co-resident installs. Confirm the
-prefix is derivable reliably at reconcile time (from the project's session
-prefix). If the no-DB-row case ever proves too broad, the safe fallback is to
-reap only names resolving to a known-but-terminated DB row and merely log
-in-namespace names with no row.
+Orphan-reap is done per-session via `IsAlive` over DB rows, so there is no
+enumeration and no namespace-matching risk in this iteration. The riskier
+"reap a tmux session with no DB row" case is deferred (see Component 2,
+Deferred), which removes the original namespace-scoping question from scope.
