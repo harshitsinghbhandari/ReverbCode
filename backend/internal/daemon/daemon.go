@@ -141,11 +141,12 @@ func Run() error {
 		return err
 	}
 
-	// Restore sessions saved by the previous daemon shutdown. Best-effort: a
-	// failure is logged but never blocks boot. RestoreAll is placed here (before
-	// srv.Run) to ensure sessions are live before the server starts serving.
-	if restoreErr := sessMgr.RestoreAll(ctx); restoreErr != nil {
-		log.Error("restore sessions on boot failed", "err", restoreErr)
+	// Reconcile sessions on boot: adopt crash-surviving runtimes, capture and
+	// terminate dead ones, reap leaked tmux, then restore shutdown-saved
+	// sessions. Best-effort: a failure is logged but never blocks boot. Placed
+	// before srv.Run so sessions are consistent before the server serves.
+	if reconcileErr := sessMgr.Reconcile(ctx); reconcileErr != nil {
+		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
 	}
 
 	runErr := srv.Run(ctx)

@@ -381,14 +381,21 @@ func TestProjectRepoResolver_ResolvesRegisteredProject(t *testing.T) {
 	}
 }
 
-// fakeSessionLifecycle records calls to RestoreAll and SaveAndTeardownAll so
-// tests can assert the daemon wiring invokes both without needing a real runtime
-// or worktree.
+// fakeSessionLifecycle records calls to Reconcile, RestoreAll, and
+// SaveAndTeardownAll so tests can assert the daemon wiring invokes the correct
+// methods without needing a real runtime or worktree.
 type fakeSessionLifecycle struct {
+	reconcileCalled       bool
 	restoreAllCalled      bool
 	saveAndTeardownCalled bool
+	reconcileErr          error
 	restoreErr            error
 	saveErr               error
+}
+
+func (f *fakeSessionLifecycle) Reconcile(_ context.Context) error {
+	f.reconcileCalled = true
+	return f.reconcileErr
 }
 
 func (f *fakeSessionLifecycle) RestoreAll(_ context.Context) error {
@@ -403,8 +410,9 @@ func (f *fakeSessionLifecycle) SaveAndTeardownAll(_ context.Context) error {
 
 // TestWiring_SessionLifecycleInterfaceInvokedByDaemon asserts the
 // sessionLifecycle interface is satisfied by *sessionmanager.Manager (compile
-// check) and that both methods dispatch correctly through the interface, matching
-// what daemon.go wires at boot/shutdown.
+// check) and that Reconcile, RestoreAll, and SaveAndTeardownAll dispatch
+// correctly through the interface, matching what daemon.go wires at
+// boot/shutdown.
 func TestWiring_SessionLifecycleInterfaceInvokedByDaemon(t *testing.T) {
 	// Verify *sessionmanager.Manager satisfies the interface at compile time.
 	var _ sessionLifecycle = (*sessionmanager.Manager)(nil)
@@ -415,6 +423,13 @@ func TestWiring_SessionLifecycleInterfaceInvokedByDaemon(t *testing.T) {
 	// Dispatch through the interface variable to exercise the real dispatch
 	// path, not just direct struct method calls.
 	var sl sessionLifecycle = fake
+
+	if err := sl.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !fake.reconcileCalled {
+		t.Fatal("Reconcile was not called through the interface")
+	}
 
 	if err := sl.RestoreAll(ctx); err != nil {
 		t.Fatalf("RestoreAll: %v", err)

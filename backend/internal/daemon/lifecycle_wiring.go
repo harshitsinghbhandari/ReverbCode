@@ -62,6 +62,7 @@ func (l *lifecycleStack) Stop() {
 // boot/shutdown wiring. A minimal interface keeps the daemon testable without
 // depending on the concrete manager type.
 type sessionLifecycle interface {
+	Reconcile(ctx context.Context) error
 	RestoreAll(ctx context.Context) error
 	SaveAndTeardownAll(ctx context.Context) error
 }
