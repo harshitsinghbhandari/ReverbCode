@@ -27,11 +27,10 @@ var (
 	ErrUnsafePath = errors.New("gitworktree: unsafe workspace path")
 )
 
-// ErrPreservedConflict is returned by ApplyPreserved when the apply produces
-// merge conflicts. The preserve ref is kept intact so the caller can surface
-// the conflict to the user and retry. The working tree is left with conflict
-// markers for manual resolution.
-var ErrPreservedConflict = errors.New("gitworktree: preserved apply produced conflicts")
+// ErrPreservedConflict is an adapter-local alias of ports.ErrPreservedConflict.
+// Tests inside this package use this name; callers outside use ports.ErrPreservedConflict
+// and errors.Is works because the adapter wraps the ports sentinel.
+var ErrPreservedConflict = ports.ErrPreservedConflict
 
 // ErrBranchCheckedOutElsewhere and ErrBranchNotFetched are adapter-local aliases
 // of the port-level sentinels: they preserve the gitworktree-prefixed message

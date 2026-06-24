@@ -158,6 +158,12 @@ var (
 	// it holds uncommitted changes or untracked files. Teardown is never
 	// forced; callers treat the workspace as intentionally preserved.
 	ErrWorkspaceDirty = errors.New("workspace: uncommitted changes present")
+	// ErrPreservedConflict is returned by ApplyPreserved when replaying a
+	// preserved ref onto the worktree produces merge conflicts. The ref is
+	// kept intact (never deleted on conflict); the working tree is left with
+	// conflict markers for manual resolution. Adapters wrap this sentinel via
+	// fmt.Errorf so callers can match it with errors.Is.
+	ErrPreservedConflict = errors.New("workspace: preserved apply produced conflicts")
 )
 
 // WorkspaceConfig is the spec for creating or restoring a session's workspace.
