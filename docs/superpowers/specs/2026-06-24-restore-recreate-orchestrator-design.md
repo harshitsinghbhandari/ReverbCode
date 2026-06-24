@@ -115,9 +115,6 @@ Orchestrator uniqueness is already enforced by the `clean` kill-then-spawn rule.
 
 The ONLY backend change in this feature is item #1 (the typed error). No new
 route, no `RecreateOrchestrator`, no OpenAPI/spec regen.
-- The new endpoint requires regenerating the OpenAPI spec (`npm run api`) and
-  will update the `httpd` spec-drift tests. This is expected and correct for a
-  new route (unlike the prior lifecycle plan, which added no routes).
 
 ### Frontend
 
