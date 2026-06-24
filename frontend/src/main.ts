@@ -486,10 +486,14 @@ async function startDaemonInner(startEpoch: number): Promise<DaemonStatus> {
 	}
 
 	// Wedged-orphan kill+replace: both attach paths returned null, but a process
-	// may still be holding the port. Kill a holder we could not attach to: either
-	// a rejected responder (answered /healthz but failed identity, probe non-null)
-	// or a hung holder that does not answer healthz but whose run-file PID is still
-	// alive. When neither condition holds there is nothing to kill; skip to spawn.
+	// may still be holding the port. The only reachable case here is a hung/wedged
+	// holder whose run-file PID is still alive but is not answering /healthz (e.g.
+	// our own daemon that bound the port and then deadlocked). Two cases are
+	// intentionally NOT handled: an identity-mismatched but healthy AO daemon is
+	// already surfaced as an error status upstream by resolveDaemonFromPort (not
+	// killed here), and a foreign non-AO process holding the port with a dead
+	// run-file PID is not replaced (out of scope). When no holder is detectable,
+	// skip straight to spawn.
 	const orphanProbe = await readDaemonProbe(expectedDaemonPort(process.env), "healthz");
 	const runFilePath_ = runFilePath();
 	let runFilePid: number | null = null;

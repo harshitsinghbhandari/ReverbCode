@@ -1572,6 +1572,41 @@ func TestReconcileLive_AliveSessionAdoptedNoop(t *testing.T) {
 	}
 }
 
+// TestReconcileLive_ProbeErrorIsNotDeath locks the invariant that a failed
+// IsAlive probe is NOT treated as proof that the session is dead. reconcileLive
+// must propagate the error and must NOT stash, terminate, or destroy.
+func TestReconcileLive_ProbeErrorIsNotDeath(t *testing.T) {
+	st := newFakeStore()
+	rt := &fakeRuntime{aliveErr: errors.New("probe boom")}
+	ws := &fakeWorkspace{}
+	lcm := &fakeLCM{store: st}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+
+	rec := domain.SessionRecord{
+		ID:           "s3",
+		ProjectID:    "p1",
+		IsTerminated: false,
+		Metadata: domain.SessionMetadata{
+			Branch: "ao/s3/root", WorkspacePath: "/wt/s3", RuntimeHandleID: "s3",
+		},
+	}
+
+	err := m.reconcileLive(context.Background(), rec)
+	if err == nil {
+		t.Fatal("reconcileLive: expected non-nil error on probe failure, got nil")
+	}
+	if ws.stashCalls != 0 {
+		t.Fatalf("StashUncommitted calls = %d, want 0 (probe error is not death)", ws.stashCalls)
+	}
+	if lcm.terminated["s3"] != 0 {
+		t.Fatalf("MarkTerminated(s3) = %d, want 0 (probe error is not death)", lcm.terminated["s3"])
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("Destroy calls = %d, want 0 (probe error is not death)", rt.destroyed)
+	}
+}
+
 func TestReconcileReap_TerminatedButAliveTmuxDestroyed(t *testing.T) {
 	st := newFakeStore()
 	rt := &fakeRuntime{aliveByHandle: map[string]bool{"t1": true}}
