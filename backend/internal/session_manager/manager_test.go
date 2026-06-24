@@ -1571,3 +1571,44 @@ func TestReconcileLive_AliveSessionAdoptedNoop(t *testing.T) {
 		t.Fatalf("adopt should be a no-op: stash=%d term=%d destroy=%d", ws.stashCalls, lcm.terminated["s2"], rt.destroyed)
 	}
 }
+
+func TestReconcileReap_TerminatedButAliveTmuxDestroyed(t *testing.T) {
+	st := newFakeStore()
+	rt := &fakeRuntime{aliveByHandle: map[string]bool{"t1": true}}
+	ws := &fakeWorkspace{}
+	lcm := &fakeLCM{store: st}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+
+	rec := domain.SessionRecord{
+		ID: "t1", ProjectID: "p1", IsTerminated: true,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "t1"},
+	}
+
+	if err := m.reconcileReap(context.Background(), rec); err != nil {
+		t.Fatalf("reconcileReap: %v", err)
+	}
+	if len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != "t1" {
+		t.Fatalf("destroyedIDs = %v, want [t1]", rt.destroyedIDs)
+	}
+}
+
+func TestReconcileReap_TerminatedAndDeadTmuxLeftAlone(t *testing.T) {
+	st := newFakeStore()
+	rt := &fakeRuntime{aliveByHandle: map[string]bool{}} // t2 not alive
+	ws := &fakeWorkspace{}
+	lcm := &fakeLCM{store: st}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: lcm, LookPath: lookPath})
+
+	rec := domain.SessionRecord{
+		ID: "t2", ProjectID: "p1", IsTerminated: true,
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "t2"},
+	}
+	if err := m.reconcileReap(context.Background(), rec); err != nil {
+		t.Fatalf("reconcileReap: %v", err)
+	}
+	if rt.destroyed != 0 {
+		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+	}
+}

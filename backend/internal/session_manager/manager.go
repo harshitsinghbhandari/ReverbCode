@@ -656,6 +656,65 @@ func (m *Manager) reconcileLive(ctx context.Context, rec domain.SessionRecord) e
 	return nil
 }
 
+// reconcileReap kills the leaked tmux session of a session the DB already marks
+// terminated. This covers the teardown that marked the row terminated but failed
+// to kill the runtime (e.g. ForceDestroy/Destroy errored after MarkTerminated).
+// Destroy is idempotent, so an already-gone session is a no-op.
+func (m *Manager) reconcileReap(ctx context.Context, rec domain.SessionRecord) error {
+	handle := runtimeHandle(rec.Metadata)
+	if handle.ID == "" {
+		return nil
+	}
+	alive, err := m.runtime.IsAlive(ctx, handle)
+	if err != nil {
+		return fmt.Errorf("reconcile reap %s: probe: %w", rec.ID, err)
+	}
+	if !alive {
+		return nil
+	}
+	if err := m.runtime.Destroy(ctx, handle); err != nil {
+		return fmt.Errorf("reconcile reap %s: destroy: %w", rec.ID, err)
+	}
+	return nil
+}
+
+// Reconcile is the boot-time consistency pass. It replaces the bare RestoreAll
+// call so that however the previous daemon died (clean shutdown, SIGKILL, or
+// crash), live reality matches the DB:
+//
+//  1. Live pass: for each non-terminated session, adopt it if its runtime
+//     survived, else capture work and mark terminated (reconcileLive).
+//  2. Reap pass: for each terminated session whose runtime leaked, kill it
+//     (reconcileReap). Runs before restore so a restored session does not
+//     collide with a leaked tmux of the same name.
+//  3. Restore pass: relaunch shutdown-saved sessions (existing RestoreAll).
+//
+// Best-effort throughout: a per-session failure is logged and never aborts the
+// pass or blocks boot.
+func (m *Manager) Reconcile(ctx context.Context) error {
+	recs, err := m.store.ListAllSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("reconcile: list sessions: %w", err)
+	}
+	for _, rec := range recs {
+		if rec.IsTerminated {
+			continue
+		}
+		if err := m.reconcileLive(ctx, rec); err != nil {
+			m.logger.Error("reconcile: live pass failed, skipping", "sessionID", rec.ID, "error", err)
+		}
+	}
+	for _, rec := range recs {
+		if !rec.IsTerminated {
+			continue
+		}
+		if err := m.reconcileReap(ctx, rec); err != nil {
+			m.logger.Error("reconcile: reap pass failed, skipping", "sessionID", rec.ID, "error", err)
+		}
+	}
+	return m.RestoreAll(ctx)
+}
+
 // RestoreAll relaunches every terminated session that was saved by the last
 // SaveAndTeardownAll. The "shutdown-saved" marker is the presence of a
 // session_worktrees row for the session; sessions the user killed before
