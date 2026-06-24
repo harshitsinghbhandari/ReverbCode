@@ -28,7 +28,7 @@ import {
 	resolveDaemonFromPort,
 	resolveDaemonFromRunFile,
 } from "./shared/daemon-attach";
-import { planDaemonTakeover } from "./shared/daemon-takeover";
+import { shouldReplacePortHolder } from "./shared/daemon-takeover";
 import { buildDaemonEnv, resolveShellEnv, type ShellRunner } from "./shared/shell-env";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/posthog-config";
 import { buildTelemetryBootstrap } from "./shared/telemetry";
@@ -486,31 +486,28 @@ async function startDaemonInner(startEpoch: number): Promise<DaemonStatus> {
 	}
 
 	// Wedged-orphan kill+replace: both attach paths returned null, but a process
-	// may still be holding the port (a crashed daemon that left its socket open,
-	// or a PID-dead run-file whose port is still bound). Spawning a new daemon
-	// then would make the Go child collide and exit 1. Detect it: probe the port
-	// once more (raw healthz, ignoring service/identity), and if something
-	// answers, kill it via the run-file PID before spawning.
-	//
-	// We intentionally skip the identity checks here: at this point we already
-	// know the port holder did NOT pass our identity checks (planDaemonTakeover
-	// got a probe that resolveDaemonFromPort rejected), so we should kill it
-	// regardless of whose binary it is.
+	// may still be holding the port. Kill a holder we could not attach to: either
+	// a rejected responder (answered /healthz but failed identity, probe non-null)
+	// or a hung holder that does not answer healthz but whose run-file PID is still
+	// alive. When neither condition holds there is nothing to kill; skip to spawn.
 	const orphanProbe = await readDaemonProbe(expectedDaemonPort(process.env), "healthz");
-	if (planDaemonTakeover(orphanProbe) === "replace") {
-		const runFilePath_ = runFilePath();
-		let runFilePid: number | null = null;
-		if (runFilePath_) {
-			try {
-				const contents = await readFile(runFilePath_, "utf8");
-				runFilePid = parseRunFile(contents)?.pid ?? null;
-			} catch {
-				// run-file absent or unreadable; proceed without a PID to kill
-			}
+	const runFilePath_ = runFilePath();
+	let runFilePid: number | null = null;
+	if (runFilePath_) {
+		try {
+			runFilePid = parseRunFile(await readFile(runFilePath_, "utf8"))?.pid ?? null;
+		} catch {
+			// run-file absent or unreadable; proceed without a PID.
 		}
-		// Use the PID from the run-file when available; fall back to the probe's
-		// reported PID as a last resort (a wedged daemon may not have written a
-		// fresh run-file).
+	}
+	// process.kill(pid, 0) does not kill; it throws iff the PID is not live.
+	let holderPidAlive = false;
+	if (runFilePid) {
+		try { process.kill(runFilePid, 0); holderPidAlive = true; } catch { holderPidAlive = false; }
+	}
+	if (shouldReplacePortHolder(orphanProbe, holderPidAlive)) {
+		// Use the run-file PID when available; fall back to the probe's reported
+		// PID as a last resort (a wedged daemon may not have written a fresh run-file).
 		const pidToKill = runFilePid ?? orphanProbe?.pid ?? null;
 		if (pidToKill) {
 			try {
