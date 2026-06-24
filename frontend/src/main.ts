@@ -14,7 +14,7 @@ import {
 import { updateElectronApp } from "update-electron-app";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,6 +28,7 @@ import {
 	resolveDaemonFromPort,
 	resolveDaemonFromRunFile,
 } from "./shared/daemon-attach";
+import { planDaemonTakeover } from "./shared/daemon-takeover";
 import { buildDaemonEnv, resolveShellEnv, type ShellRunner } from "./shared/shell-env";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/posthog-config";
 import { buildTelemetryBootstrap } from "./shared/telemetry";
@@ -482,6 +483,59 @@ async function startDaemonInner(startEpoch: number): Promise<DaemonStatus> {
 	if (directDaemon) {
 		setDaemonStatus(directDaemon);
 		return daemonStatus;
+	}
+
+	// Wedged-orphan kill+replace: both attach paths returned null, but a process
+	// may still be holding the port (a crashed daemon that left its socket open,
+	// or a PID-dead run-file whose port is still bound). Spawning a new daemon
+	// then would make the Go child collide and exit 1. Detect it: probe the port
+	// once more (raw healthz, ignoring service/identity), and if something
+	// answers, kill it via the run-file PID before spawning.
+	//
+	// We intentionally skip the identity checks here: at this point we already
+	// know the port holder did NOT pass our identity checks (planDaemonTakeover
+	// got a probe that resolveDaemonFromPort rejected), so we should kill it
+	// regardless of whose binary it is.
+	const orphanProbe = await readDaemonProbe(expectedDaemonPort(process.env), "healthz");
+	if (planDaemonTakeover(orphanProbe) === "replace") {
+		const runFilePath_ = runFilePath();
+		let runFilePid: number | null = null;
+		if (runFilePath_) {
+			try {
+				const contents = await readFile(runFilePath_, "utf8");
+				runFilePid = parseRunFile(contents)?.pid ?? null;
+			} catch {
+				// run-file absent or unreadable; proceed without a PID to kill
+			}
+		}
+		// Use the PID from the run-file when available; fall back to the probe's
+		// reported PID as a last resort (a wedged daemon may not have written a
+		// fresh run-file).
+		const pidToKill = runFilePid ?? orphanProbe?.pid ?? null;
+		if (pidToKill) {
+			try {
+				process.kill(-pidToKill, "SIGTERM");
+			} catch {
+				try {
+					process.kill(pidToKill, "SIGTERM");
+				} catch {
+					// process already gone; proceed
+				}
+			}
+		}
+		// Poll until the port is free (probe returns null) or 8 s elapses.
+		const TAKEOVER_TIMEOUT_MS = 8_000;
+		const TAKEOVER_POLL_MS = 200;
+		const deadline = Date.now() + TAKEOVER_TIMEOUT_MS;
+		while (Date.now() < deadline) {
+			const still = await readDaemonProbe(expectedDaemonPort(process.env), "healthz");
+			if (!still) break;
+			await new Promise<void>((r) => setTimeout(r, TAKEOVER_POLL_MS));
+		}
+		// Remove the stale run-file so the new daemon can write a fresh one.
+		if (runFilePath_) {
+			await rm(runFilePath_, { force: true });
+		}
 	}
 
 	if (launch.source === "bundled" && !existsSync(launch.command)) {
