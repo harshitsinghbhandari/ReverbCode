@@ -196,7 +196,7 @@ func (w *Workspace) Destroy(ctx context.Context, info ports.WorkspaceInfo) error
 // residue remains.
 //
 // ponytail: only safe to call AFTER the session's uncommitted work has been
-// captured by Task 2's StashUncommitted. Calling it before capture silently
+// captured via StashUncommitted. Calling it before capture silently
 // discards agent work. For interactive teardown (ao session kill, ao cleanup)
 // use Destroy, which refuses dirty worktrees via ErrWorkspaceDirty.
 func (w *Workspace) ForceDestroy(ctx context.Context, info ports.WorkspaceInfo) error {

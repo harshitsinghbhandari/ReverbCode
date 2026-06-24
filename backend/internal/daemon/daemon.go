@@ -142,10 +142,8 @@ func Run() error {
 	}
 
 	// Restore sessions saved by the previous daemon shutdown. Best-effort: a
-	// failure is logged but never blocks boot. Both SIGTERM and the graceful
-	// POST /shutdown path cancel ctx, which causes srv.Run to return; placing
-	// RestoreAll here (before srv.Run) ensures sessions are live before the
-	// server starts serving.
+	// failure is logged but never blocks boot. RestoreAll is placed here (before
+	// srv.Run) to ensure sessions are live before the server starts serving.
 	if restoreErr := sessMgr.RestoreAll(ctx); restoreErr != nil {
 		log.Error("restore sessions on boot failed", "err", restoreErr)
 	}
@@ -153,9 +151,9 @@ func Run() error {
 	runErr := srv.Run(ctx)
 
 	// Save and tear down all live sessions before the store closes. Both SIGTERM
-	// and POST /shutdown funnel through srv.Run returning (the signal cancels ctx,
-	// which srv.Run watches; the HTTP handler cancels the same ctx via the
-	// shutdown endpoint), so this single call site covers both paths.
+	// and POST /shutdown funnel through srv.Run returning (SIGTERM cancels ctx,
+	// which srv.Run selects on; POST /shutdown closes the shutdownRequested channel,
+	// which srv.Run also selects on), so this single call site covers both paths.
 	//
 	// Use a fresh context with a bounded deadline: the ctx that caused srv.Run
 	// to return is already cancelled, so passing it would abort the save

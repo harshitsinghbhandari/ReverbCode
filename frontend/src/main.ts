@@ -727,6 +727,10 @@ app.on("before-quit", (event) => {
 		// Best-effort graceful shutdown: POST /shutdown so the daemon flushes
 		// its session state before exiting. An ~8s timeout prevents a hung or
 		// absent daemon from blocking quit indefinitely.
+		// Note: the daemon's internal save bound is 30s (shutdownSaveTimeout), so
+		// if this fetch times out and we proceed to killDaemon (SIGTERM), the first
+		// SIGTERM only cancels the daemon's listen context; the daemon's in-flight
+		// save (on a fresh context) still runs to completion or its own 30s bound.
 		if (port !== undefined) {
 			try {
 				await fetch(`http://127.0.0.1:${port}/shutdown`, {
